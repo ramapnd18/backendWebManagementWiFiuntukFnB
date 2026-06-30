@@ -1,0 +1,40 @@
+# Backend - WiFi Management API Server
+# NestJS 11 + Prisma 7 + PostgreSQL 18 + Redis 8 + BullMQ 5
+
+Direktori ini berisi source code untuk REST API backend.
+
+## Stack
+- NestJS 11 (TypeScript 6.x)
+- Prisma ORM 7.x + PostgreSQL 18
+- Redis 8 + BullMQ 5.x (Queue Worker)
+- JWT Authentication (jsonwebtoken 9.x)
+- PDFKit 0.18.x (Generate PDF voucher)
+- @nestjs/swagger 8.x (Auto-generated API Docs)
+
+## Jalankan Development
+```bash
+pnpm install
+cp .env.example .env
+pnpm prisma migrate dev
+pnpm run start:dev
+```
+
+| Service | URL |
+|---|---|
+| API Server | http://localhost:4000 |
+| Swagger API Docs | http://localhost:4000/api/docs |
+| Bull Board (Queue) | http://localhost:4000/bull-board |
+
+## Struktur Module
+```
+src/modules/
+├── auth/           → Login, JWT guard, strategy
+├── servers/        → CRUD MikroTik servers
+├── mikrotik/       → MikroTik API client (shared service)
+├── profiles/       → Hotspot user profile
+├── vouchers/       → Generate single & batch voucher
+├── pos/            → POS integration endpoint
+├── monitoring/     → Active users real-time
+├── ai/             → AI analysis (skeleton, siap pakai API)
+└── logs/           → Activity log
+```

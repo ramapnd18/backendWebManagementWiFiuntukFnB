@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "LogAction" ADD VALUE 'AI_ANALYSIS_DELETED';

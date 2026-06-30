@@ -1,0 +1,3 @@
+# Placeholder - src/modules directory
+# Setiap fitur memiliki module sendiri (NestJS modular architecture)
+# Contoh: auth/, servers/, profiles/, vouchers/, pos/, monitoring/, ai/, logs/
