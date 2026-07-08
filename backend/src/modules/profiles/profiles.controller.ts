@@ -8,11 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -56,14 +58,25 @@ export class ProfilesController {
   }
 
   @Get()
+  // Owner BOLEH read-only profil router miliknya (ter-scope). Mutasi tetap TEKNISI/SUPER_ADMIN.
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Ambil semua profil hotspot' })
+  @ApiQuery({
+    name: 'serverId',
+    required: false,
+    description: 'Filter profil untuk satu server (router)',
+  })
   @ApiResponse({ status: 200, description: 'Profil berhasil diambil' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findAll(@CurrentUser() user: AuthUser) {
-    return this.profilesService.findAll(user);
+  async findAll(
+    @CurrentUser() user: AuthUser,
+    @Query('serverId') serverId?: string,
+  ) {
+    return this.profilesService.findAll(user, serverId);
   }
 
   @Get(':id')
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Ambil detail profil hotspot' })
   @ApiResponse({ status: 200, description: 'Profil berhasil ditemukan' })
   @ApiResponse({ status: 404, description: 'Profil tidak ditemukan' })

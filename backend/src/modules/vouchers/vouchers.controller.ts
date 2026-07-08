@@ -11,9 +11,11 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { VoucherStatus } from '@prisma/client';
 import { VouchersService } from './vouchers.service.js';
 import { GenerateSingleDto } from './dto/generate-single.dto.js';
 import { GenerateBatchDto } from './dto/generate-batch.dto.js';
@@ -77,12 +79,36 @@ export class VouchersController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('TEKNISI', 'SUPER_ADMIN')
+  // Owner BOLEH read-only voucher router miliknya (ter-scope). Mutasi tetap TEKNISI/SUPER_ADMIN.
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Ambil list semua voucher terbitan' })
+  @ApiOperation({
+    summary: 'Ambil list voucher terbitan (ter-scope, filter & pagination)',
+  })
+  @ApiQuery({ name: 'skip', required: false, type: Number })
+  @ApiQuery({ name: 'take', required: false, type: Number })
+  @ApiQuery({ name: 'serverId', required: false, type: String })
+  @ApiQuery({ name: 'profileId', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, enum: VoucherStatus })
+  @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'List voucher berhasil diambil' })
-  async findAll(@CurrentUser() user: AuthUser) {
-    return this.vouchersService.findAll(user);
+  async findAll(
+    @CurrentUser() user: AuthUser,
+    @Query('skip') skip?: number,
+    @Query('take') take?: number,
+    @Query('serverId') serverId?: string,
+    @Query('profileId') profileId?: string,
+    @Query('status') status?: VoucherStatus,
+    @Query('search') search?: string,
+  ) {
+    return this.vouchersService.findAll(user, {
+      skip,
+      take,
+      serverId,
+      profileId,
+      status,
+      search,
+    });
   }
 
   @Get('pdf/filtered')
@@ -107,7 +133,7 @@ export class VouchersController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('TEKNISI', 'SUPER_ADMIN')
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Ambil detail voucher' })
   @ApiResponse({

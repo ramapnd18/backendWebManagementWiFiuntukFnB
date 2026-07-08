@@ -6,6 +6,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
 import { generatePosApiKey, maskApiKey } from './pos.util.js';
+import {
+  assertOwnerAccess,
+  serverScopeWhere,
+  type AuthUser,
+} from '../../common/scope.util.js';
 
 /**
  * Pengelolaan API key POS (admin, terproteksi JWT).
@@ -25,7 +30,7 @@ export class PosKeysService {
    * Buat API key baru untuk satu server. Mengembalikan key MENTAH hanya sekali —
    * DB hanya menyimpan hash SHA-256-nya.
    */
-  async create(label: string, serverId: string) {
+  async create(label: string, serverId: string, user: AuthUser) {
     // Validasi server tujuan ada
     const server = await this.prisma.mikrotikServer.findUnique({
       where: { id: serverId },
@@ -35,6 +40,8 @@ export class PosKeysService {
         `Server dengan ID "${serverId}" tidak ditemukan`,
       );
     }
+    // Cegah buat key untuk router milik owner lain
+    assertOwnerAccess(user, server.ownerId);
 
     const { rawKey, keyHash, prefix } = generatePosApiKey();
 
@@ -62,9 +69,13 @@ export class PosKeysService {
     };
   }
 
-  /** List semua API key (ter-mask, tanpa hash) + info server terikat. */
-  async findAll() {
+  /**
+   * List API key (ter-mask, tanpa hash) + info server terikat.
+   * Di-scope ke server milik owner user; opsional filter 1 serverId.
+   */
+  async findAll(user: AuthUser, serverId?: string) {
     const keys = await this.prisma.posApiKey.findMany({
+      where: { serverId, server: serverScopeWhere(user) },
       orderBy: { createdAt: 'desc' },
       include: { server: { select: { id: true, name: true } } },
     });
@@ -82,8 +93,8 @@ export class PosKeysService {
   }
 
   /** Aktifkan / nonaktifkan API key. */
-  async setActive(id: string, isActive: boolean) {
-    await this.ensureExists(id);
+  async setActive(id: string, isActive: boolean, user: AuthUser) {
+    await this.ensureExists(id, user);
 
     const updated = await this.prisma.posApiKey.update({
       where: { id },
@@ -104,17 +115,25 @@ export class PosKeysService {
   }
 
   /** Hapus (revoke permanen) API key. */
-  async remove(id: string) {
-    await this.ensureExists(id);
+  async remove(id: string, user: AuthUser) {
+    await this.ensureExists(id, user);
     await this.prisma.posApiKey.delete({ where: { id } });
     return { message: 'API key berhasil dihapus' };
   }
 
-  private async ensureExists(id: string) {
-    const existing = await this.prisma.posApiKey.findUnique({ where: { id } });
+  /**
+   * Pastikan key ada DAN milik owner user (cek via server terikat).
+   * Cegah user tenant lain revoke/nonaktifkan key outlet orang.
+   */
+  private async ensureExists(id: string, user: AuthUser) {
+    const existing = await this.prisma.posApiKey.findUnique({
+      where: { id },
+      include: { server: { select: { ownerId: true } } },
+    });
     if (!existing) {
       throw new NotFoundException(`API key dengan ID ${id} tidak ditemukan`);
     }
+    assertOwnerAccess(user, existing.server.ownerId);
     return existing;
   }
 }

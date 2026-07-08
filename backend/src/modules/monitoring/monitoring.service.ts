@@ -2,17 +2,35 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MikrotikService } from '../mikrotik/mikrotik.service.js';
 import { type AuthUser, assertOwnerAccess } from '../../common/scope.util.js';
 
 @Injectable()
 export class MonitoringService {
+  private readonly logger = new Logger(MonitoringService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mikrotikService: MikrotikService,
   ) {}
+
+  /**
+   * Kegagalan koneksi/perintah ke router BUKAN error server kami → jangan biarkan
+   * jadi 500 mentah (spam-kan dashboard yang polling tiap 3s). Bungkus jadi 502
+   * (Bad Gateway): backend adalah gateway ke router yang sedang tak bisa dihubungi.
+   */
+  private routerUnreachable(serverId: string, context: string, error: any): never {
+    const message = error?.message ?? String(error);
+    this.logger.warn(`${context} gagal untuk server ${serverId}: ${message}`);
+    throw new BadGatewayException(`${context}: router tidak dapat dihubungi`);
+  }
 
   // ─── Mapper (raw RouterOS → bentuk yang dipakai frontend) ───────────────────
   private mapActiveUsers(activeRaw: any[]) {
@@ -93,7 +111,7 @@ export class MonitoringService {
         traffic: this.mapTraffic(snap.interfaces),
       };
     } catch (error: any) {
-      throw new Error(`Gagal memantau router MikroTik: ${error.message}`);
+      this.routerUnreachable(serverId, 'Snapshot monitoring', error);
     }
   }
 
@@ -106,9 +124,7 @@ export class MonitoringService {
       const activeRaw = await this.mikrotikService.getActiveUsers(serverId);
       return this.mapActiveUsers(activeRaw);
     } catch (error: any) {
-      throw new Error(
-        `Gagal memantau pengguna aktif dari MikroTik: ${error.message}`,
-      );
+      this.routerUnreachable(serverId, 'Pantau pengguna aktif', error);
     }
   }
 
@@ -121,9 +137,7 @@ export class MonitoringService {
       const resources = await this.mikrotikService.getSystemResource(serverId);
       return this.mapResources(resources, serverId, server.name);
     } catch (error: any) {
-      throw new Error(
-        `Gagal memantau resource hardware dari MikroTik: ${error.message}`,
-      );
+      this.routerUnreachable(serverId, 'Pantau resource hardware', error);
     }
   }
 
@@ -136,9 +150,7 @@ export class MonitoringService {
       const interfacesRaw = await this.mikrotikService.getInterfaces(serverId);
       return this.mapTraffic(interfacesRaw);
     } catch (error: any) {
-      throw new Error(
-        `Gagal memantau traffic dari MikroTik: ${error.message}`,
-      );
+      this.routerUnreachable(serverId, 'Pantau traffic', error);
     }
   }
 }

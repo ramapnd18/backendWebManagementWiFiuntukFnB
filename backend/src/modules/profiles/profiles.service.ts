@@ -95,9 +95,10 @@ export class ProfilesService {
     });
   }
 
-  async findAll(user: AuthUser) {
+  async findAll(user: AuthUser, serverId?: string) {
     return this.prisma.hotspotProfile.findMany({
-      where: { server: serverScopeWhere(user) },
+      // Scope owner + optional filter 1 router (cegah campur antar-router).
+      where: { serverId, server: serverScopeWhere(user) },
       include: { server: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -360,6 +361,10 @@ export class ProfilesService {
       { timeout: 30000 },
     );
 
+    // B9: sertakan daftar profil FINAL (setelah sync) agar frontend bisa langsung
+    // setQueryData tanpa GET /profiles tambahan. Additive — ringkasan lama tetap ada.
+    const profiles = await this.findAll(user, serverId);
+
     return {
       serverId,
       totalRouterProfiles: routerProfiles.length,
@@ -369,6 +374,7 @@ export class ProfilesService {
       importedVouchersCount,
       usersSynced: usersFetchOk,
       imported,
+      profiles,
     };
   }
 }

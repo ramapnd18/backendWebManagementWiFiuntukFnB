@@ -15,6 +15,7 @@ import { VoucherQueueService } from './voucher-queue.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
 import { GenerateSingleDto } from './dto/generate-single.dto.js';
 import { GenerateBatchDto } from './dto/generate-batch.dto.js';
+import { VoucherStatus } from '@prisma/client';
 import {
   type AuthUser,
   serverScopeWhere,
@@ -185,15 +186,52 @@ export class VouchersService {
     };
   }
 
-  async findAll(user: AuthUser) {
-    return this.prisma.voucher.findMany({
-      where: { server: serverScopeWhere(user) },
-      include: {
-        profile: { select: { name: true, rateLimit: true, validity: true } },
-        server: { select: { name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  /**
+   * List voucher ter-scope owner + filter server-side (serverId/profileId/status/search)
+   * dan pagination (skip/take). Mengikuti pola `/activity-log`: balas `{ data, meta }`.
+   */
+  async findAll(
+    user: AuthUser,
+    params: {
+      skip?: number;
+      take?: number;
+      serverId?: string;
+      profileId?: string;
+      status?: VoucherStatus;
+      search?: string;
+    } = {},
+  ) {
+    const { skip = 0, take = 50, serverId, profileId, status, search } = params;
+
+    const whereClause: any = { server: serverScopeWhere(user) };
+    if (serverId) whereClause.serverId = serverId;
+    if (profileId) whereClause.profileId = profileId;
+    if (status) whereClause.status = status;
+    if (search) {
+      whereClause.OR = [
+        { username: { contains: search, mode: 'insensitive' } },
+        { outletName: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.voucher.findMany({
+        where: whereClause,
+        include: {
+          profile: { select: { name: true, rateLimit: true, validity: true } },
+          server: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: Number(skip),
+        take: Number(take),
+      }),
+      this.prisma.voucher.count({ where: whereClause }),
+    ]);
+
+    return {
+      data,
+      meta: { total, skip: Number(skip), take: Number(take) },
+    };
   }
 
   async findOne(id: string, user: AuthUser) {
