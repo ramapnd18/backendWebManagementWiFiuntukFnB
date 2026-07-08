@@ -104,15 +104,25 @@ export class MonitoringService {
   async getSnapshot(serverId: string, user: AuthUser) {
     const server = await this.getServerOrThrow(serverId, user);
     try {
-      const snap = await this.mikrotikService.getMonitoringSnapshot(serverId);
-      return {
-        activeUsers: this.mapActiveUsers(snap.active),
-        resources: this.mapResources(snap.resource, serverId, server.name),
-        traffic: this.mapTraffic(snap.interfaces),
-      };
+      return await this.fetchSnapshot(serverId, server.name);
     } catch (error: any) {
       this.routerUnreachable(serverId, 'Snapshot monitoring', error);
     }
+  }
+
+  /**
+   * Ambil + mapping snapshot TANPA cek auth. Kepemilikan sudah divalidasi sebelumnya
+   * (mis. saat subscribe WebSocket). Dipakai poller terpusat (B7) — melempar apa adanya
+   * bila router gagal agar caller yang menentukan penanganannya.
+   */
+  async fetchSnapshot(serverId: string, serverName: string) {
+    const snap = await this.mikrotikService.getMonitoringSnapshot(serverId);
+    return {
+      serverId,
+      activeUsers: this.mapActiveUsers(snap.active),
+      resources: this.mapResources(snap.resource, serverId, serverName),
+      traffic: this.mapTraffic(snap.interfaces),
+    };
   }
 
   /**
