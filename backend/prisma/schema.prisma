@@ -63,7 +63,7 @@ model MikrotikServer {
   host          String
   port          Int          @default(8728)
   username      String
-  password      String // enkripsi saat implementasi
+  password      String // dienkripsi AES-256-GCM at-rest (common/crypto.util.ts)
   useSSL        Boolean      @default(false)
   hotspotName   String? // nama hotspot server di MikroTik (misal: hotspot1)
   dnsName       String? // DNS name login page captive portal (misal: hotspot.wifi.com)
