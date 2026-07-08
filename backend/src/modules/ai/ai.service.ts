@@ -411,7 +411,12 @@ ${configJson}`;
    * riwayat percakapan (multi-turn), lalu memanggil LLM. Gagal LLM → tidak ada data tersimpan.
    */
   async chat(
-    dto: { question: string; serverId?: string; sessionId?: string },
+    dto: {
+      question: string;
+      serverId?: string;
+      sessionId?: string;
+      provider?: string;
+    },
     user: AuthUser,
   ) {
     // 1. Validasi & scoping router (bila ada)
@@ -461,7 +466,7 @@ ${configJson}`;
     // 5. Panggil LLM (gagal → tidak ada yang disimpan)
     let answer: string;
     try {
-      answer = await this.callLLM(prompt);
+      answer = await this.callLLM(prompt, dto.provider);
     } catch (err: any) {
       throw new BadRequestException(`Gagal memanggil AI: ${err.message}`);
     }
@@ -490,7 +495,17 @@ ${configJson}`;
       return s;
     });
 
-    return { sessionId: saved.id, answer, serverId: dto.serverId ?? null };
+    const usedProvider =
+      dto.provider?.toLowerCase() ||
+      process.env.LLM_PROVIDER?.toLowerCase() ||
+      'gemini';
+
+    return {
+      sessionId: saved.id,
+      answer,
+      serverId: dto.serverId ?? null,
+      provider: usedProvider,
+    };
   }
 
   /** Daftar sesi chat milik user (terbaru dulu). */

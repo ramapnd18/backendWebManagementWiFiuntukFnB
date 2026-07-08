@@ -181,7 +181,24 @@ socket.emit('unsubscribe', { serverId })  // dan/atau socket.disconnect()
 
 ---
 
-## 9. Checklist untuk frontend
+## 9. Di luar audit — AI Chat: pilih **provider** LLM (opsional)
+
+`POST /ai/chat` kini menerima field opsional **`provider`** untuk memilih LLM per-request.
+Kosong → ikut env `LLM_PROVIDER` (default `gemini`).
+
+- **Nilai valid:** `gemini` | `openrouter` | `openai` | `anthropic` (selain itu → `400`).
+- **Request:** `{ question, serverId?, sessionId?, provider? }`
+- **Respons kini menyertakan `provider`:**
+  ```jsonc
+  { "sessionId": "...", "answer": "...", "serverId": null, "provider": "gemini" }
+  ```
+- **Aksi frontend (opsional):** kalau mau UI pilih-provider, kirim `provider`; kalau tidak,
+  abaikan — perilaku lama tetap (default gemini). Field respons `provider` bisa ditampilkan
+  sebagai badge "dijawab oleh …".
+
+---
+
+## 10. Checklist untuk frontend
 
 - [ ] **B6** — `GET /vouchers`: baca `res.data.data` + `res.data.meta`, pindah paginasi & filter ke server.
 - [ ] **B5** — tangani `502` monitoring sebagai "router disconnected", bukan crash.
@@ -189,9 +206,10 @@ socket.emit('unsubscribe', { serverId })  // dan/atau socket.disconnect()
 - [ ] **B7** — (disarankan) `socket.io-client` ke `/monitoring`, ganti polling monitoring → listener `snapshot`/`status`.
 - [ ] **B4** — (opsional) `refetchInterval` pada list `/servers` untuk badge auto-segar.
 - [ ] **B9** — (opsional) pakai `profiles` dari respons sync untuk `setQueryData`.
+- [ ] **AI** — (opsional) kirim `provider` di `POST /ai/chat`; tampilkan `provider` dari respons.
 
 Pertanyaan / butuh contoh payload lebih detail → colek tim backend. 🙌
 
 ---
 
-*Disusun tim Backend, menjawab `doc/CATATAN_BACKEND.md`. Perubahan kode ada di commit `6304f20`.*
+*Disusun tim Backend, menjawab `doc/CATATAN_BACKEND.md`. Perubahan kode ada di commit `6304f20` dst.*

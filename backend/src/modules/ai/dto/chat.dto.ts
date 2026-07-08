@@ -1,4 +1,18 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+
+/** Provider LLM yang didukung untuk AI chat. */
+export const AI_CHAT_PROVIDERS = [
+  'gemini',
+  'openrouter',
+  'openai',
+  'anthropic',
+] as const;
 
 export class ChatDto {
   @IsString({ message: 'Pertanyaan harus berupa teks' })
@@ -15,4 +29,14 @@ export class ChatDto {
   @IsOptional()
   @IsString()
   sessionId?: string;
+
+  /**
+   * Provider LLM yang dipakai (opsional). Bila kosong → ikut env `LLM_PROVIDER`
+   * (default `gemini`). Pilihan: gemini | openrouter | openai | anthropic.
+   */
+  @IsOptional()
+  @IsIn(AI_CHAT_PROVIDERS, {
+    message: `Provider harus salah satu dari: ${AI_CHAT_PROVIDERS.join(', ')}`,
+  })
+  provider?: (typeof AI_CHAT_PROVIDERS)[number];
 }
