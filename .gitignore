@@ -10,3 +10,6 @@ build/
 coverage/
 .idea/
 .vscode/
+
+# Arsip dokumen (isi sudah ada sebagai .md di doc/spec/)
+doc/spec.zip
