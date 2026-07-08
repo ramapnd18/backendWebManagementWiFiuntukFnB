@@ -111,11 +111,12 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | GET | `/vouchers/pdf/filtered?serverId=&profileId=&status=` | PDF terfilter **(publik)** |
 
 ### Monitoring — `/api/monitoring`
-| Verb | Path | Keterangan |
-|------|------|------------|
-| GET | `/monitoring/active/:serverId` | User hotspot aktif |
-| GET | `/monitoring/resources/:serverId` | CPU/RAM/HDD/uptime |
-| GET | `/monitoring/traffic/:serverId` | RX/TX per interface |
+| Verb | Path | Role | Keterangan |
+|------|------|------|------------|
+| GET | `/monitoring/snapshot/:serverId` | TEKNISI, SUPER_ADMIN | **Gabungan** active+resource+traffic dalam **1 koneksi** (1 login + 3 perintah) — dipakai auto-refresh dashboard |
+| GET | `/monitoring/active/:serverId` | TEKNISI, SUPER_ADMIN | User hotspot aktif |
+| GET | `/monitoring/resources/:serverId` | TEKNISI, SUPER_ADMIN | CPU/RAM/HDD/uptime |
+| GET | `/monitoring/traffic/:serverId` | OWNER, TEKNISI, SUPER_ADMIN | RX/TX per interface (Owner read-only) |
 
 ### AI — `/api/ai`
 | Verb | Path | Role | Keterangan |
@@ -190,44 +191,69 @@ Migrasi terkait: `20260627155930_rbac_roles_ownership`, `20260628061332_billing_
 
 ---
 
-## 6. Endpoint yang HARUS DIBUAT (sesuai Project Brief)
+## 6. Integrasi POS & Optimasi Lanjut
 
-### 6.1 POS — `POST /api/pos/v1/trigger-voucher` ❌ **BELUM ADA**
+### 6.1 POS — ✅ **SUDAH ADA** (modul `pos`)
 
 > 📄 **Spesifikasi lengkap (payload, auth API key, skema DB, alur, error, cURL, checklist):
-> lihat [`doc/POS_INTEGRATION.md`](./POS_INTEGRATION.md).** Ringkasan di bawah.
-
-Modul `pos` sebelumnya dihapus (akan dibangun ulang oleh rekan tim). Spesifikasi target:
+> lihat [`doc/POS_INTEGRATION.md`](./POS_INTEGRATION.md).** Ringkasan implementasi di bawah.
 
 **Tujuan:** sistem kasir (POS) memicu pembuatan voucher otomatis saat transaksi selesai →
-response berisi data voucher untuk dicetak di struk.
+response berisi data voucher + QR untuk dicetak di struk.
 
-**Proteksi:** header `x-api-key: <POS_API_KEY>` (BUKAN JWT — dipanggil mesin POS).
+**Proteksi:** header `x-api-key` (BUKAN JWT). Guard `PosApiKeyGuard`. API key dibuat **per-outlet**
+(terikat 1 server), disimpan sebagai hash **sha256** (`PosApiKey.keyHash`), key mentah tampil sekali.
 
-**Request body (usulan):**
+**Endpoint:**
+
+| Verb | Path | Auth | Keterangan |
+|------|------|------|------------|
+| GET | `/api/pos/v1/profiles` | `x-api-key` | Daftar profil pada server milik API key (POS tak kirim serverId) |
+| POST | `/api/pos/v1/trigger-voucher` | `x-api-key` | Trigger 1 voucher (idempoten). Baru → **201**, replay → **200** |
+| POST/GET/PATCH/DELETE | `/api/pos-keys[/:id]` | **JWT** | CRUD API key POS (buat/list ter-mask/aktif-nonaktif/revoke) |
+
+**Request body `trigger-voucher`:**
 ```jsonc
 {
-  "transactionId": "TRX-001",   // unik, idempoten (cegah dobel voucher)
-  "serverId": "cuid-server",    // router target
-  "profileName": "1k",          // nama profile (bandwidth/durasi)
-  "quantity": 1,                // jumlah voucher (single/batch)
-  "outletName": "Kafe A",       // opsional, tampil di struk
-  "customerName": "Budi"        // opsional
+  "transactionId": "TRX-POS-2026-001", // unik, kunci idempotensi (cegah dobel voucher)
+  "profileId": "cuid-profile",          // ID profile (bukan nama)
+  "serverId": "cuid-server",            // OPSIONAL — bila diisi harus = server milik key, else 403
+  "outletName": "Kafe A",               // opsional, tampil di struk
+  "customerName": "Budi"                // opsional
 }
 ```
 
-**Response (usulan):** array voucher `{ username, password, profileName, validity, rateLimit, loginUrl }`
-untuk dicetak.
+**Response** (`{ transactionId, voucher }`):
+```jsonc
+{
+  "transactionId": "TRX-POS-2026-001",
+  "voucher": {
+    "username": "482913", "password": "482913",
+    "profileName": "1k", "rateLimit": "2M/2M", "validity": "1d",
+    "loginUrl": "http://<dnsName|host>/login?username=...&password=...",
+    "qrBase64": "data:image/png;base64,...",
+    "instructions": "Sambungkan ke WiFi ... → scan QR / buka login → masukkan username & password."
+  }
+}
+```
 
-**Reuse yang sudah ada:** `VouchersService.generateSingle()` / `generateBatch()` →
-`MikrotikService.createHotspotUser()`. Tambah idempotensi via `transactionId` (model
-`PosTransaction` baru atau kolom penanda di Voucher).
+**Perilaku kunci:**
+- `serverId` **diturunkan dari API key** (per-outlet); body `serverId` beda → **403**.
+- 1 request = **1 voucher** (tanpa `quantity`); voucher **dibuat baru** di router (bukan ambil stok).
+- Idempoten via `PosTransaction.transactionId` unik → replay SUCCESS balikkan voucher sama (HTTP 200).
+- Router gagal → `PosTransaction(FAILED)` + log `POS_TRANSACTION_RECEIVED` + **502**.
+  Sukses → simpan Voucher+PosTransaction **atomik** + log `POS_VOUCHER_GENERATED` (HTTP 201).
+- Username numerik unik via `generateNumericCode` (`POS_VOUCHER_CODE_LENGTH`, default 6; password=username).
 
-**Catatan env:** `POS_API_KEY` (tambahkan kembali ke `.env` + `.env.example`).
+**Implementasi:** `PosService.triggerVoucher/listProfiles`, `PosKeysService`, `PosApiKeyGuard`,
+`MikrotikService.createHotspotUser`. Membuat voucher langsung (tak lewat `VouchersService`).
+
+**Catatan env:** `POS_VOUCHER_CODE_LENGTH` (opsional). Tidak ada `POS_API_KEY` global — key per-outlet di DB.
 
 ### 6.2 (Opsional) Monitoring WebSocket/SSE
 Monitoring kini **polling** (3-60 dtk). Brief minta "real-time" — terpenuhi via polling, namun
-WebSocket/SSE = optimasi untuk target < 5 detik & kurangi beban.
+pola **hybrid** (backend polling router + diff → push ke klien via WebSocket/SSE hanya saat berubah)
+= optimasi untuk target < 5 detik & kurangi beban. Detail: [`doc/spec/ARSITEKTUR.md`](./spec/ARSITEKTUR.md) §10.1.
 
 ---
 
