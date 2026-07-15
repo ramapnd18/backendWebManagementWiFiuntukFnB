@@ -70,6 +70,8 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | Verb | Path | Role | Keterangan |
 |------|------|------|------------|
 | POST | `/auth/login` | publik | Login → `{accessToken, user:{id,email,name,role,ownerId}}`. Throttle **5/menit/IP** |
+| POST | `/auth/register` | publik | Registrasi mandiri **Owner** (role dipaksa OWNER) + langganan FREE otomatis + auto-login. Throttle **5/menit/IP** |
+| POST | `/auth/google` | publik | Login/registrasi via Google **ID token** → JWT. Butuh `GOOGLE_CLIENT_ID`. Throttle **10/menit/IP** |
 | GET | `/auth/me` | semua | Profil user aktif (termasuk `role`) |
 
 ### Users — `/api/users`
@@ -109,7 +111,8 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | POST | `/vouchers/single` | Generate 1 voucher (instan) |
 | POST | `/vouchers/batch` | Generate batch (BullMQ background job) |
 | POST | `/vouchers/delete-bulk` | Hapus massal (UNUSED) — **partial-safe** |
-| GET | `/vouchers` | List voucher |
+| GET | `/vouchers` | List voucher (filter `status` → used/unused, pagination) |
+| GET | `/vouchers/stats?serverId=&profileId=` | Ringkasan jumlah per-status `{UNUSED,USED,REVOKED,EXPIRED,total}` (ter-scope) |
 | GET | `/vouchers/:id` | Detail voucher |
 | GET | `/vouchers/pdf/batch/:batchId` | PDF per batch **(publik)** |
 | GET | `/vouchers/pdf/single/:id` | PDF single **(publik)** |
@@ -149,7 +152,17 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 ### Activity Log — `/api/activity-log`
 | Verb | Path | Role | Keterangan |
 |------|------|------|------------|
-| GET | `/activity-log?skip=&take=&serverId=&action=` | semua | Log paginated + filter (ter-scope) |
+| GET | `/activity-log?skip=&take=&serverId=&action=` | semua | Riwayat **aktivitas umum** (default **tanpa** aksi koneksi router), ter-scope |
+| GET | `/activity-log/router-connections?skip=&take=&serverId=` | semua | Riwayat **koneksi router** (router offline/gagal terhubung), ter-scope |
+
+> Dua endpoint terpisah: aksi `ROUTER_CONNECTION_FAILED` hanya muncul di `/router-connections`; endpoint umum mengecualikannya (kecuali diminta eksplisit via `?action=`).
+
+### POS (JWT — riwayat) — `/api/pos/transactions`
+| Verb | Path | Role | Keterangan |
+|------|------|------|------------|
+| GET | `/pos/transactions?skip=&take=&serverId=&status=&search=` | OWNER, TEKNISI, SUPER_ADMIN | Riwayat transaksi POS ter-scope per Owner (include server/profil/voucher). Detail: [`api/pos.md`](./api/pos.md) |
+
+> Endpoint POS `x-api-key` (mesin kasir) ada di §6.1 & [`api/pos.md`](./api/pos.md); ini endpoint **JWT** untuk panel admin.
 
 ---
 
@@ -174,7 +187,7 @@ Model (`@@map` ke snake_case jamak, ID `cuid()`):
 
 | Model | Tabel | Inti |
 |-------|-------|------|
-| `User` | `users` | email unik, password bcrypt, **`role`** (SUPER_ADMIN/OWNER/TEKNISI), `ownerId?` (self-relation Owner↔Teknisi, onDelete Cascade) |
+| `User` | `users` | email unik, **`password?`** (bcrypt; null utk akun Google-only), **`googleId?`** (unik), **`role`** (SUPER_ADMIN/OWNER/TEKNISI), `ownerId?` (self-relation Owner↔Teknisi, onDelete Cascade) |
 | `MikrotikServer` | `mikrotik_servers` | **`ownerId`** (pemilik=Owner, onDelete Cascade), host, port, username, **password (AES)**, useSSL, lastStatus |
 | `HotspotProfile` | `hotspot_profiles` | rateLimit, sessionTimeout, sharedUsers, validity · unik `[serverId,name]` |
 | `Voucher` | `vouchers` | username (unik global), password, status, batchId, outletName, expiredAt |
@@ -185,7 +198,7 @@ Model (`@@map` ke snake_case jamak, ID `cuid()`):
 | `Plan` | `plans` | `code` (FREE/STANDARD), name, maxRouters, price, durationDays |
 | `Subscription` | `subscriptions` | `userId`, `planId`, status, startedAt, `expiredAt?` — sumber kebenaran kuota |
 | `PaymentTransaction` | `payment_transactions` | `merchantOrderId` (unik, idempotensi), amount, status, duitkuReference, paymentUrl, paidAt |
-| `PosApiKey` / `PosTransaction` | `pos_api_keys` / `pos_transactions` | integrasi POS (API key per-outlet + idempotensi transaksi) — lihat [`api/pos.md`](./api/pos.md) |
+| `PosApiKey` / `PosTransaction` | `pos_api_keys` / `pos_transactions` | integrasi POS (API key per-outlet + idempotensi transaksi). `PosTransaction` kini punya relasi `server`/`profile`/`voucher` untuk scoping & riwayat — lihat [`api/pos.md`](./api/pos.md) |
 
 Enum: `Role`, `ServerStatus`, `VoucherStatus`, `AiReportStatus`, `ChatRole`,
 `SubscriptionStatus`, `PaymentStatus`, `PosTxStatus`, `LogAction` (+ aksi billing: `PAYMENT_INITIATED/RECEIVED/FAILED`, `SUBSCRIPTION_ACTIVATED`).
@@ -233,6 +246,7 @@ webhook Duitku validasi **signature (MD5, `timingSafeEqual`) + idempoten**.
 DATABASE_URL, REDIS_HOST, REDIS_PORT
 JWT_SECRET            # wajib (tanpa fallback — gagal cepat bila kosong)
 JWT_EXPIRES_IN       # mis. 7d
+GOOGLE_CLIENT_ID     # opsional — Client ID OAuth 2.0 utk POST /auth/google (kosong → login Google nonaktif)
 MIKROTIK_ENC_KEY     # wajib — 64 char hex (32 byte) untuk enkripsi kredensial
 LLM_PROVIDER, OPENROUTER_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
 FRONTEND_URL, PORT

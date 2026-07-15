@@ -111,6 +111,27 @@ export class VouchersController {
     });
   }
 
+  @Get('stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Ringkasan jumlah voucher per-status (used/unused, ter-scope)',
+  })
+  @ApiQuery({ name: 'serverId', required: false, type: String })
+  @ApiQuery({ name: 'profileId', required: false, type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Objek { UNUSED, USED, REVOKED, EXPIRED, total }',
+  })
+  async getStats(
+    @CurrentUser() user: AuthUser,
+    @Query('serverId') serverId?: string,
+    @Query('profileId') profileId?: string,
+  ) {
+    return this.vouchersService.getStats(user, { serverId, profileId });
+  }
+
   @Get('pdf/filtered')
   @ApiOperation({
     summary: 'Download lembaran PDF voucher berdasarkan filter server dan profile',

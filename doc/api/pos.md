@@ -146,6 +146,22 @@ Headers:
 
 ---
 
+## 4b. Riwayat Transaksi POS (panel admin — JWT)
+
+Berbeda dari endpoint `x-api-key` di atas (untuk mesin kasir), ini endpoint **JWT** untuk panel admin
+melihat riwayat transaksi POS, ter-scope per Owner.
+
+```
+GET /api/pos/transactions
+Headers: Authorization: Bearer <JWT>
+Query (opsional): skip, take, serverId, status (SUCCESS|FAILED), search (outletName/customerName/transactionId)
+```
+- **Role:** OWNER, TEKNISI, SUPER_ADMIN. Scoping via relasi `server → ownerId` (OWNER/TEKNISI hanya miliknya).
+- **Response 200:** `{ data: [...], meta: { total, skip, take } }`. Tiap item menyertakan relasi ringkas
+  `server {id,name}`, `profile {id,name}`, `voucher {id,username,status}` (voucher null bila transaksi FAILED).
+
+---
+
 ## 5. Tabel Error / HTTP
 
 | Kondisi | HTTP | Pesan |

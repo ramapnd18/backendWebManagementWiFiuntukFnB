@@ -3,6 +3,7 @@ import { PosController } from './pos.controller.js';
 import { PosService } from './pos.service.js';
 import { PosKeysController } from './pos-keys.controller.js';
 import { PosKeysService } from './pos-keys.service.js';
+import { PosTransactionsController } from './pos-transactions.controller.js';
 import { PosApiKeyGuard } from './guards/pos-api-key.guard.js';
 
 /**
@@ -13,7 +14,7 @@ import { PosApiKeyGuard } from './guards/pos-api-key.guard.js';
  * oleh AuthModule.
  */
 @Module({
-  controllers: [PosController, PosKeysController],
+  controllers: [PosController, PosKeysController, PosTransactionsController],
   providers: [PosService, PosKeysService, PosApiKeyGuard],
 })
 export class PosModule {}

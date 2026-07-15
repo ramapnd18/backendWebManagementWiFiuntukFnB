@@ -22,7 +22,8 @@ enum Role {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String // bcrypt hash
+  password  String? // bcrypt hash — null untuk akun yang hanya login via Google
+  googleId  String?  @unique // Google account id (sub) bila login/registrasi via Google
   name      String
   role      Role     @default(OWNER)
   isActive  Boolean  @default(true)
@@ -72,13 +73,14 @@ model MikrotikServer {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  owner        User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  profiles     HotspotProfile[]
-  vouchers     Voucher[]
-  logs         ActivityLog[]
-  aiReports    AiReport[]
-  posApiKeys   PosApiKey[]
-  chatSessions AiChatSession[]
+  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  profiles        HotspotProfile[]
+  vouchers        Voucher[]
+  logs            ActivityLog[]
+  aiReports       AiReport[]
+  posApiKeys      PosApiKey[]
+  posTransactions PosTransaction[]
+  chatSessions    AiChatSession[]
 
   @@index([ownerId])
   @@map("mikrotik_servers")
@@ -108,8 +110,9 @@ model HotspotProfile {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  server   MikrotikServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  vouchers Voucher[]
+  server          MikrotikServer   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  vouchers        Voucher[]
+  posTransactions PosTransaction[]
 
   @@unique([serverId, name])
   @@map("hotspot_profiles")
@@ -133,8 +136,9 @@ model Voucher {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  server  MikrotikServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  profile HotspotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  server          MikrotikServer   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  profile         HotspotProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  posTransactions PosTransaction[]
 
   @@index([serverId])
   @@index([profileId])
@@ -320,9 +324,14 @@ model PosTransaction {
   customerName  String?
   createdAt     DateTime    @default(now())
 
-  posApiKey PosApiKey? @relation(fields: [posApiKeyId], references: [id])
+  posApiKey PosApiKey?     @relation(fields: [posApiKeyId], references: [id])
+  server    MikrotikServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  profile   HotspotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  voucher   Voucher?       @relation(fields: [voucherId], references: [id], onDelete: SetNull)
 
   @@index([serverId])
+  @@index([profileId])
+  @@index([voucherId])
   @@map("pos_transactions")
 }
 

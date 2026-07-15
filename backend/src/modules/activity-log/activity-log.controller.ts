@@ -18,7 +18,10 @@ export class ActivityLogController {
   constructor(private readonly activityLogService: ActivityLogService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Mendapatkan daftar log aktivitas (history)' })
+  @ApiOperation({
+    summary:
+      'Daftar log aktivitas umum (tanpa riwayat koneksi router — lihat /router-connections)',
+  })
   @ApiQuery({ name: 'skip', required: false, type: Number })
   @ApiQuery({ name: 'take', required: false, type: Number })
   @ApiQuery({ name: 'serverId', required: false, type: String })
@@ -32,5 +35,25 @@ export class ActivityLogController {
     @Query('action') action?: LogAction,
   ) {
     return this.activityLogService.getLogs({ skip, take, serverId, action }, user);
+  }
+
+  @Get('router-connections')
+  @ApiOperation({
+    summary: 'Riwayat koneksi router (router offline/gagal terhubung), ter-scope',
+  })
+  @ApiQuery({ name: 'skip', required: false, type: Number })
+  @ApiQuery({ name: 'take', required: false, type: Number })
+  @ApiQuery({ name: 'serverId', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Berhasil mengambil riwayat koneksi.' })
+  async getRouterConnectionLogs(
+    @CurrentUser() user: AuthUser,
+    @Query('skip') skip?: number,
+    @Query('take') take?: number,
+    @Query('serverId') serverId?: string,
+  ) {
+    return this.activityLogService.getRouterConnectionLogs(
+      { skip, take, serverId },
+      user,
+    );
   }
 }

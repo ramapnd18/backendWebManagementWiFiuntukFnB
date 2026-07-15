@@ -234,6 +234,43 @@ export class VouchersService {
     };
   }
 
+  /**
+   * Ringkasan jumlah voucher per-status (ter-scope per Owner). Satu query groupBy.
+   * @returns { UNUSED, USED, REVOKED, EXPIRED, total }
+   */
+  async getStats(
+    user: AuthUser,
+    params: { serverId?: string; profileId?: string } = {},
+  ) {
+    const { serverId, profileId } = params;
+
+    const whereClause: any = { server: serverScopeWhere(user) };
+    if (serverId) whereClause.serverId = serverId;
+    if (profileId) whereClause.profileId = profileId;
+
+    const grouped = await this.prisma.voucher.groupBy({
+      by: ['status'],
+      where: whereClause,
+      _count: { _all: true },
+    });
+
+    // Mulai dari 0 untuk semua status agar respons konsisten walau tak ada data
+    const stats: Record<VoucherStatus, number> = {
+      UNUSED: 0,
+      USED: 0,
+      REVOKED: 0,
+      EXPIRED: 0,
+    };
+    let total = 0;
+    for (const row of grouped) {
+      const count = row._count._all;
+      stats[row.status] = count;
+      total += count;
+    }
+
+    return { ...stats, total };
+  }
+
   async findOne(id: string, user: AuthUser) {
     const voucher = await this.prisma.voucher.findUnique({
       where: { id },

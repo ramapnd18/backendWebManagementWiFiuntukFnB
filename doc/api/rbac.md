@@ -34,7 +34,8 @@
 | `GET /monitoring/traffic/:serverId` (TX/RX) | ✅ | ✅ (miliknya) | ✅ |
 | `GET /monitoring/active|resources|snapshot/:serverId` | ✅ | ❌ 403 | ✅ |
 | `* /ai` (analisis & laporan) | ✅ | ❌ 403 | ✅ |
-| `GET /activity-log` (riwayat offline/aktivitas) | ✅ (semua) | ✅ (miliknya) | ✅ |
+| `GET /activity-log` (aktivitas umum) & `/activity-log/router-connections` (koneksi router) | ✅ (semua) | ✅ (miliknya) | ✅ |
+| `GET /pos/transactions` (riwayat POS) | ✅ (semua) | ✅ (miliknya) | ✅ |
 | `* /users` (manajemen user) | ✅ (semua) | ✅ (Teknisi-nya) | ❌ 403 |
 
 > Semua data list/detail otomatis ter-scope: OWNER/TEKNISI hanya melihat resource milik Owner.
@@ -71,6 +72,48 @@
 ```json
 { "statusCode": 401, "message": "Email atau password salah", "error": "Unauthorized" }
 ```
+
+> Akun yang **hanya** terdaftar via Google (tanpa password) yang mencoba login password → **401**
+> "Akun ini terdaftar via Google. Silakan masuk dengan Google."
+
+---
+
+### 1b. Registrasi mandiri (Owner)
+
+`POST /api/auth/register` — **publik**, throttle 5/menit/IP. Role dipaksa **OWNER** (body tidak boleh
+menentukan role). Membuat langganan **FREE** otomatis, lalu **auto-login** (mengembalikan JWT sama seperti login).
+
+**Request Payload**
+```json
+{ "email": "owner@contoh.com", "password": "rahasia123", "name": "Kafe Kopi Senja" }
+```
+
+**Response 201 (Success)** — `{ accessToken, user }` (identik struktur dengan login; `role: "OWNER"`, `ownerId: null`).
+
+**Response 400** — email sudah terdaftar / body tidak valid:
+```json
+{ "statusCode": 400, "message": "Email sudah terdaftar", "error": "Bad Request" }
+```
+
+---
+
+### 1c. Login / Registrasi via Google
+
+`POST /api/auth/google` — **publik**, throttle 10/menit/IP. Frontend melakukan Google Sign-In,
+mendapatkan **ID token**, lalu mengirimkannya. Backend memverifikasi token (`google-auth-library`),
+mencari user by email (menautkan `googleId`) atau membuat **OWNER baru** (tanpa password, + langganan FREE),
+lalu mengembalikan JWT.
+
+**Prasyarat env:** `GOOGLE_CLIENT_ID` (Client ID OAuth 2.0). Bila kosong → **400** "Login Google belum dikonfigurasi".
+
+**Request Payload**
+```json
+{ "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6..." }
+```
+
+**Response 200 (Success)** — `{ accessToken, user }` (sama seperti login).
+
+**Response 401** — token Google tidak valid / email belum terverifikasi.
 
 ---
 

@@ -16,7 +16,9 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { MikrotikService } from '../mikrotik/mikrotik.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
 import { TriggerVoucherDto } from './dto/trigger-voucher.dto.js';
+import { ListPosTransactionsDto } from './dto/list-pos-transactions.dto.js';
 import { generateNumericCode } from './pos.util.js';
+import { serverScopeWhere, type AuthUser } from '../../common/scope.util.js';
 
 /**
  * Logika integrasi POS (lihat doc/POS_INTEGRATION.md §3 & §4).
@@ -39,6 +41,45 @@ export class PosService {
   ) {
     const parsed = parseInt(process.env.POS_VOUCHER_CODE_LENGTH ?? '6', 10);
     this.codeLength = Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
+  }
+
+  /**
+   * Riwayat transaksi POS milik Owner (ter-scope via relasi server → ownerId).
+   * Dipakai panel admin (JWT), BUKAN endpoint x-api-key. Return { data, meta }.
+   */
+  async listTransactions(user: AuthUser, params: ListPosTransactionsDto = {}) {
+    const { skip = 0, take = 50, serverId, status, search } = params;
+
+    const whereClause: any = { server: serverScopeWhere(user) };
+    if (serverId) whereClause.serverId = serverId;
+    if (status) whereClause.status = status;
+    if (search) {
+      whereClause.OR = [
+        { outletName: { contains: search, mode: 'insensitive' } },
+        { customerName: { contains: search, mode: 'insensitive' } },
+        { transactionId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.posTransaction.findMany({
+        where: whereClause,
+        include: {
+          server: { select: { id: true, name: true } },
+          profile: { select: { id: true, name: true } },
+          voucher: { select: { id: true, username: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: Number(skip),
+        take: Number(take),
+      }),
+      this.prisma.posTransaction.count({ where: whereClause }),
+    ]);
+
+    return {
+      data,
+      meta: { total, skip: Number(skip), take: Number(take) },
+    };
   }
 
   /**
