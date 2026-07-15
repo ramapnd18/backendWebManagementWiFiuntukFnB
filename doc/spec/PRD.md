@@ -111,7 +111,7 @@ Legenda status: ✅ selesai · 🟡 sebagian · ❌ belum.
 
 ## 8. Di Luar Cakupan (Backend)
 
-- UI/halaman frontend (dibahas di `FRONTEND.md`).
+- UI/halaman frontend (dibahas di [`../frontend/FRONTEND.md`](../frontend/FRONTEND.md)).
 - Histori trafik TX/RX tersimpan jangka panjang (belum dipersist; monitoring realtime saja).
 - Multi-currency / paket dinamis di luar FREE & STANDARD.
 - Notifikasi email/WA.

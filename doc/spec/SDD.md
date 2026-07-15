@@ -192,7 +192,7 @@ Modul terimplementasi penuh. Dua permukaan:
   `GET /pos-keys` (ter-mask), `PATCH /pos-keys/:id` (aktif/nonaktif), `DELETE /pos-keys/:id` (revoke).
 
 Catatan: POS membuat voucher **langsung** (bukan lewat `VouchersService`); 1 request = 1 voucher (tanpa `quantity`).
-Detail: [`../POS_INTEGRATION.md`](../POS_INTEGRATION.md).
+Detail kontrak endpoint: [`../api/pos.md`](../api/pos.md).
 
 ---
 

@@ -3,8 +3,8 @@
 Panduan lengkap menguji endpoint integrasi POS pakai **cURL** atau **Postman**.
 Cocok untuk verifikasi mandiri sebelum POS rekan tim dihubungkan.
 
-- **Base URL:** `http://localhost:4100/api`
-- **Swagger (UI interaktif):** `http://localhost:4100/api/docs` → tag **POS**
+- **Base URL:** `http://localhost:4000/api`
+- **Swagger (UI interaktif):** `http://localhost:4000/api/docs` → tag **POS**
 - **Kredensial admin default:** `admin@wifimanagement.local` / `admin123`
 
 > **Prasyarat:** backend jalan (`npm run start:dev`), PostgreSQL & Redis aktif, dan minimal
@@ -33,7 +33,7 @@ Cocok untuk verifikasi mandiri sebelum POS rekan tim dihubungkan.
 ### Langkah 1 — Login admin, ambil JWT
 
 ```bash
-curl -X POST http://localhost:4100/api/auth/login \
+curl -X POST http://localhost:4000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@wifimanagement.local","password":"admin123"}'
 ```
@@ -53,7 +53,7 @@ TOKEN="eyJhbGci...tempel-token-di-sini..."
 ### Langkah 2 — Buat API key POS (admin)
 
 ```bash
-curl -X POST http://localhost:4100/api/pos-keys \
+curl -X POST http://localhost:4000/api/pos-keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"label":"Outlet A"}'
@@ -80,7 +80,7 @@ APIKEY="pos_9cdb854d2840cd599d343a43d39d5cbea0f091457961c078"
 ### Langkah 3 — Endpoint A: list paket WiFi (POS)
 
 ```bash
-curl http://localhost:4100/api/pos/v1/profiles \
+curl http://localhost:4000/api/pos/v1/profiles \
   -H "x-api-key: $APIKEY"
 ```
 
@@ -113,7 +113,7 @@ PROFILE_ID="cmqa8lw9u000bz8us0tip6xab"
 Sistem akan **membuat kode voucher baru langsung di MikroTik**, lalu balas datanya.
 
 ```bash
-curl -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
+curl -X POST http://localhost:4000/api/pos/v1/trigger-voucher \
   -H "x-api-key: $APIKEY" \
   -H "Content-Type: application/json" \
   -d "{
@@ -152,13 +152,13 @@ Pastikan tiap kondisi memberi hasil benar. **`-i`** menampilkan status HTTP.
 
 ### B1. Tanpa API key → **401**
 ```bash
-curl -i http://localhost:4100/api/pos/v1/profiles
+curl -i http://localhost:4000/api/pos/v1/profiles
 # → HTTP/1.1 401 Unauthorized  {"message":"API key tidak valid",...}
 ```
 
 ### B2. API key salah → **401**
 ```bash
-curl -i http://localhost:4100/api/pos/v1/profiles -H "x-api-key: pos_salah123"
+curl -i http://localhost:4000/api/pos/v1/profiles -H "x-api-key: pos_salah123"
 # → 401
 ```
 
@@ -170,7 +170,7 @@ Jalankan Langkah 4 **dua kali** dengan `transactionId` sama (`TRX-001`):
 
 ### B4. Transaksi baru — `transactionId` BEDA → voucher BARU
 ```bash
-curl -i -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
+curl -i -X POST http://localhost:4000/api/pos/v1/trigger-voucher \
   -H "x-api-key: $APIKEY" -H "Content-Type: application/json" \
   -d "{\"transactionId\":\"TRX-002\",\"serverId\":\"$SERVER_ID\",\"profileId\":\"$PROFILE_ID\"}"
 # → 201, username voucher BEDA
@@ -178,7 +178,7 @@ curl -i -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
 
 ### B5. Server tidak ada → **404**
 ```bash
-curl -i -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
+curl -i -X POST http://localhost:4000/api/pos/v1/trigger-voucher \
   -H "x-api-key: $APIKEY" -H "Content-Type: application/json" \
   -d "{\"transactionId\":\"TRX-X\",\"serverId\":\"tidak-ada\",\"profileId\":\"$PROFILE_ID\"}"
 # → 404 "Server dengan ID tidak-ada tidak ditemukan"
@@ -186,7 +186,7 @@ curl -i -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
 
 ### B6. Body invalid (transactionId kosong) → **400**
 ```bash
-curl -i -X POST http://localhost:4100/api/pos/v1/trigger-voucher \
+curl -i -X POST http://localhost:4000/api/pos/v1/trigger-voucher \
   -H "x-api-key: $APIKEY" -H "Content-Type: application/json" \
   -d "{\"serverId\":\"$SERVER_ID\",\"profileId\":\"$PROFILE_ID\"}"
 # → 400 "transactionId tidak boleh kosong"
@@ -202,15 +202,15 @@ Matikan/cabut router (atau pakai server yang OFFLINE), lalu trigger:
 ### B8. Kelola API key (admin)
 ```bash
 # List (ter-mask)
-curl http://localhost:4100/api/pos-keys -H "Authorization: Bearer $TOKEN"
+curl http://localhost:4000/api/pos-keys -H "Authorization: Bearer $TOKEN"
 
 # Nonaktifkan (key jadi 401 saat dipakai)
-curl -X PATCH http://localhost:4100/api/pos-keys/<KEY_ID> \
+curl -X PATCH http://localhost:4000/api/pos-keys/<KEY_ID> \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"isActive":false}'
 
 # Hapus (revoke permanen)
-curl -X DELETE http://localhost:4100/api/pos-keys/<KEY_ID> \
+curl -X DELETE http://localhost:4000/api/pos-keys/<KEY_ID> \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -222,20 +222,20 @@ PowerShell tidak suka cURL JSON yang sama. Pakai `Invoke-RestMethod`:
 
 ```powershell
 # 1. Login
-$login = Invoke-RestMethod -Uri "http://localhost:4100/api/auth/login" -Method POST `
+$login = Invoke-RestMethod -Uri "http://localhost:4000/api/auth/login" -Method POST `
   -ContentType "application/json" `
   -Body '{"email":"admin@wifimanagement.local","password":"admin123"}'
 $token = $login.accessToken
 
 # 2. Buat API key
-$keyRes = Invoke-RestMethod -Uri "http://localhost:4100/api/pos-keys" -Method POST `
+$keyRes = Invoke-RestMethod -Uri "http://localhost:4000/api/pos-keys" -Method POST `
   -ContentType "application/json" -Headers @{Authorization="Bearer $token"} `
   -Body '{"label":"Outlet A"}'
 $apiKey = $keyRes.key
 $keyRes.key   # ← salin (tampil sekali)
 
 # 3. List profil
-$profiles = Invoke-RestMethod -Uri "http://localhost:4100/api/pos/v1/profiles" -Method GET `
+$profiles = Invoke-RestMethod -Uri "http://localhost:4000/api/pos/v1/profiles" -Method GET `
   -Headers @{"x-api-key"=$apiKey}
 $profiles | ConvertTo-Json -Depth 5
 $serverId  = $profiles.servers[0].serverId
@@ -243,7 +243,7 @@ $profileId = $profiles.servers[0].profiles[0].profileId
 
 # 4. Trigger voucher
 $body = @{ transactionId="TRX-001"; serverId=$serverId; profileId=$profileId; outletName="Outlet A" } | ConvertTo-Json
-$v = Invoke-RestMethod -Uri "http://localhost:4100/api/pos/v1/trigger-voucher" -Method POST `
+$v = Invoke-RestMethod -Uri "http://localhost:4000/api/pos/v1/trigger-voucher" -Method POST `
   -ContentType "application/json" -Headers @{"x-api-key"=$apiKey} -Body $body
 $v.voucher    # username, password, loginUrl, qrBase64, instructions
 ```
@@ -256,7 +256,7 @@ $v.voucher    # username, password, loginUrl, qrBase64, instructions
 1. **Buat Environment** (Postman → Environments → +). Tambah variabel:
    | Variable | Initial Value |
    |----------|---------------|
-   | `baseUrl` | `http://localhost:4100/api` |
+   | `baseUrl` | `http://localhost:4000/api` |
    | `token`   | *(kosong, diisi otomatis)* |
    | `apiKey`  | *(kosong, isi manual stlh buat key)* |
    | `serverId` | *(isi dari list profil)* |
@@ -341,7 +341,7 @@ $v.voucher    # username, password, loginUrl, qrBase64, instructions
 
 **Cek audit API key:**
 ```bash
-curl http://localhost:4100/api/pos-keys -H "Authorization: Bearer $TOKEN"
+curl http://localhost:4000/api/pos-keys -H "Authorization: Bearer $TOKEN"
 # field lastUsedAt terupdate tiap key dipakai
 ```
 

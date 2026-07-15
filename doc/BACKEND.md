@@ -4,9 +4,14 @@
 **Status dokumen:** mencerminkan kondisi kode hasil audit (in-progress). Terakhir diperbarui **2026-06-29**
 (RBAC 3 role, Billing+Duitku, AI Chat widget, manajemen User).
 
-> **Dokumentasi endpoint per-fitur (Method/URL/Payload/Response + hasil uji):**
-> [`doc/api/rbac.md`](./api/rbac.md) · [`doc/api/billing.md`](./api/billing.md) · [`doc/api/ai-chat.md`](./api/ai-chat.md).
-> Roadmap & status backend lengkap di [`doc/todo_backendp.md`](./todo_backendp.md).
+Dokumen ini adalah **acuan dasar backend** dan pusat navigasi dokumentasi. Untuk detail lebih dalam:
+
+| Kebutuhan | Dokumen |
+|-----------|---------|
+| Kontrak endpoint per-fitur (Method/URL/Payload/Response + hasil uji) | [`doc/api/`](./api/) — indeks: [`api/README.md`](./api/README.md) |
+| Dokumen rekayasa formal (PRD/SRS/SDD/Arsitektur) | [`doc/spec/`](./spec/) |
+| Roadmap & status backend | [`doc/todo_backendp.md`](./todo_backendp.md) |
+| Peta seluruh folder dokumentasi | [`doc/README.md`](./README.md) |
 
 ---
 
@@ -180,7 +185,7 @@ Model (`@@map` ke snake_case jamak, ID `cuid()`):
 | `Plan` | `plans` | `code` (FREE/STANDARD), name, maxRouters, price, durationDays |
 | `Subscription` | `subscriptions` | `userId`, `planId`, status, startedAt, `expiredAt?` — sumber kebenaran kuota |
 | `PaymentTransaction` | `payment_transactions` | `merchantOrderId` (unik, idempotensi), amount, status, duitkuReference, paymentUrl, paidAt |
-| `PosApiKey` / `PosTransaction` | `pos_api_keys` / `pos_transactions` | skema integrasi POS (modul sedang dibangun ulang oleh rekan tim) |
+| `PosApiKey` / `PosTransaction` | `pos_api_keys` / `pos_transactions` | integrasi POS (API key per-outlet + idempotensi transaksi) — lihat [`api/pos.md`](./api/pos.md) |
 
 Enum: `Role`, `ServerStatus`, `VoucherStatus`, `AiReportStatus`, `ChatRole`,
 `SubscriptionStatus`, `PaymentStatus`, `PosTxStatus`, `LogAction` (+ aksi billing: `PAYMENT_INITIATED/RECEIVED/FAILED`, `SUBSCRIPTION_ACTIVATED`).
@@ -195,65 +200,24 @@ Migrasi terkait: `20260627155930_rbac_roles_ownership`, `20260628061332_billing_
 
 ### 6.1 POS — ✅ **SUDAH ADA** (modul `pos`)
 
-> 📄 **Spesifikasi lengkap (payload, auth API key, skema DB, alur, error, cURL, checklist):
-> lihat [`doc/POS_INTEGRATION.md`](./POS_INTEGRATION.md).** Ringkasan implementasi di bawah.
-
-**Tujuan:** sistem kasir (POS) memicu pembuatan voucher otomatis saat transaksi selesai →
-response berisi data voucher + QR untuk dicetak di struk.
-
-**Proteksi:** header `x-api-key` (BUKAN JWT). Guard `PosApiKeyGuard`. API key dibuat **per-outlet**
-(terikat 1 server), disimpan sebagai hash **sha256** (`PosApiKey.keyHash`), key mentah tampil sekali.
-
-**Endpoint:**
+Sistem kasir (POS) memicu pembuatan voucher otomatis saat transaksi selesai → response berisi data
+voucher + QR untuk dicetak di struk. Proteksi via header `x-api-key` (bukan JWT); API key dibuat
+**per-outlet** (terikat 1 server), disimpan sebagai hash sha256, key mentah tampil sekali.
 
 | Verb | Path | Auth | Keterangan |
 |------|------|------|------------|
-| GET | `/api/pos/v1/profiles` | `x-api-key` | Daftar profil pada server milik API key (POS tak kirim serverId) |
+| GET | `/api/pos/v1/profiles` | `x-api-key` | Daftar profil pada server milik API key |
 | POST | `/api/pos/v1/trigger-voucher` | `x-api-key` | Trigger 1 voucher (idempoten). Baru → **201**, replay → **200** |
-| POST/GET/PATCH/DELETE | `/api/pos-keys[/:id]` | **JWT** | CRUD API key POS (buat/list ter-mask/aktif-nonaktif/revoke) |
+| POST/GET/PATCH/DELETE | `/api/pos-keys[/:id]` | **JWT** | CRUD API key POS |
 
-**Request body `trigger-voucher`:**
-```jsonc
-{
-  "transactionId": "TRX-POS-2026-001", // unik, kunci idempotensi (cegah dobel voucher)
-  "profileId": "cuid-profile",          // ID profile (bukan nama)
-  "serverId": "cuid-server",            // OPSIONAL — bila diisi harus = server milik key, else 403
-  "outletName": "Kafe A",               // opsional, tampil di struk
-  "customerName": "Budi"                // opsional
-}
-```
+> 📄 **Kontrak endpoint lengkap** (payload, auth, error, cURL): [`doc/api/pos.md`](./api/pos.md).
+> Panduan uji mandiri: [`doc/api/pos-testing.md`](./api/pos-testing.md).
 
-**Response** (`{ transactionId, voucher }`):
-```jsonc
-{
-  "transactionId": "TRX-POS-2026-001",
-  "voucher": {
-    "username": "482913", "password": "482913",
-    "profileName": "1k", "rateLimit": "2M/2M", "validity": "1d",
-    "loginUrl": "http://<dnsName|host>/login?username=...&password=...",
-    "qrBase64": "data:image/png;base64,...",
-    "instructions": "Sambungkan ke WiFi ... → scan QR / buka login → masukkan username & password."
-  }
-}
-```
-
-**Perilaku kunci:**
-- `serverId` **diturunkan dari API key** (per-outlet); body `serverId` beda → **403**.
-- 1 request = **1 voucher** (tanpa `quantity`); voucher **dibuat baru** di router (bukan ambil stok).
-- Idempoten via `PosTransaction.transactionId` unik → replay SUCCESS balikkan voucher sama (HTTP 200).
-- Router gagal → `PosTransaction(FAILED)` + log `POS_TRANSACTION_RECEIVED` + **502**.
-  Sukses → simpan Voucher+PosTransaction **atomik** + log `POS_VOUCHER_GENERATED` (HTTP 201).
-- Username numerik unik via `generateNumericCode` (`POS_VOUCHER_CODE_LENGTH`, default 6; password=username).
-
-**Implementasi:** `PosService.triggerVoucher/listProfiles`, `PosKeysService`, `PosApiKeyGuard`,
-`MikrotikService.createHotspotUser`. Membuat voucher langsung (tak lewat `VouchersService`).
-
-**Catatan env:** `POS_VOUCHER_CODE_LENGTH` (opsional). Tidak ada `POS_API_KEY` global — key per-outlet di DB.
-
-### 6.2 (Opsional) Monitoring WebSocket/SSE
-Monitoring kini **polling** (3-60 dtk). Brief minta "real-time" — terpenuhi via polling, namun
-pola **hybrid** (backend polling router + diff → push ke klien via WebSocket/SSE hanya saat berubah)
-= optimasi untuk target < 5 detik & kurangi beban. Detail: [`doc/spec/ARSITEKTUR.md`](./spec/ARSITEKTUR.md) §10.1.
+### 6.2 Monitoring real-time — ✅ **SUDAH ADA** (WebSocket + poller terpusat)
+Pola **hybrid** sudah diimplementasikan (`monitoring.gateway.ts` + `monitoring-poller.service.ts`):
+backend menjalankan poller terpusat (`MONITORING_POLL_INTERVAL_MS`, default 3000) yang menarik router
++ diff, lalu **push ke klien via WebSocket (socket.io)** hanya saat data berubah — memenuhi target
+freshness < 5 detik tanpa polling per-klien. Detail arsitektur: [`doc/spec/ARSITEKTUR.md`](./spec/ARSITEKTUR.md) §10.1.
 
 ---
 
@@ -274,7 +238,8 @@ LLM_PROVIDER, OPENROUTER_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_A
 FRONTEND_URL, PORT
 DUITKU_MERCHANT_CODE, DUITKU_API_KEY          # kosong → checkout 503 (kuota & callback tetap jalan)
 DUITKU_BASE_URL, DUITKU_CALLBACK_URL, DUITKU_RETURN_URL
-# POS_API_KEY        # tambahkan saat modul POS dibangun ulang
+POS_VOUCHER_CODE_LENGTH   # opsional, default 6 — panjang kode voucher POS (tak ada POS_API_KEY global; key per-outlet di DB)
+MONITORING_POLL_INTERVAL_MS  # opsional, default 3000 — interval poller monitoring real-time
 ```
 
 ## 8. Command

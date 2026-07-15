@@ -5,7 +5,7 @@
 **Sumber:** to-do list hasil sesi mentoring + audit kode existing.
 **Tanggal disusun:** 2026-06-27.
 
-> Dokumen ini melengkapi `doc/TODOLIST.md` (milestone 40 hari) dan `doc/BACKEND.md`
+> Dokumen ini melengkapi [`doc/BACKEND.md`](./BACKEND.md)
 > (arsitektur). Di sini khusus 4 pilar **baru** dari mentoring: **RBAC**, **AI Widget**,
 > **Billing/Kuota + Duitku**, dan **Dokumentasi API**.
 

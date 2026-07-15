@@ -142,7 +142,7 @@ Autentikasi via header `x-api-key` (`PosApiKeyGuard`); API key terikat 1 server 
 | FR-11.7 | Sukses → simpan Voucher+PosTransaction atomik + log `POS_VOUCHER_GENERATED` | — | ✅ |
 | FR-11.8 | CRUD API key POS (key mentah tampil sekali, disimpan hash sha256, ter-mask) | `POST/GET/PATCH/DELETE /api/pos-keys` (JWT) | ✅ |
 
-> Spesifikasi lengkap POS: [`../POS_INTEGRATION.md`](../POS_INTEGRATION.md).
+> Kontrak endpoint lengkap POS: [`../api/pos.md`](../api/pos.md).
 
 ---
 
