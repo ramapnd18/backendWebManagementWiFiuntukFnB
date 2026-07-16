@@ -1,16 +1,16 @@
 # Hasil Uji Endpoint RBAC
 
-**Tanggal uji:** 2026-06-29
-**Lingkungan:** lokal — backend `http://localhost:4000/api` (prod build), PostgreSQL 18 (Docker :5433).
+**Tanggal uji:** 2026-06-29 (RBAC inti) · **diperbarui 2026-07-16** (registrasi Owner + login Google).
+**Lingkungan:** lokal — backend `http://localhost:4000/api` (prod build), PostgreSQL (Docker :5433).
 **Metode:** uji black-box via `curl` terhadap server berjalan, membandingkan **HTTP status** aktual vs harapan.
-**Cakupan:** Auth, Manajemen User (A.4), penegakan akses lintas modul (A.3), dan isolasi tenant (scoping).
+**Cakupan:** Auth (login/registrasi/Google), Manajemen User (A.4), penegakan akses lintas modul (A.3), dan isolasi tenant (scoping).
 
 ## Ringkasan
 
 | | |
 |---|---|
-| Total skenario | **45** |
-| ✅ Lulus | **45** |
+| Total skenario | **49** |
+| ✅ Lulus | **49** |
 | ❌ Gagal | **0** |
 
 > Akun uji (seed): SUPER_ADMIN `admin@…/admin123` · OWNER `owner@…/owner123` · TEKNISI `teknisi@…/teknisi123`.
@@ -24,7 +24,12 @@
 |---|---|:-:|:-:|:-:|
 | POST `/auth/login` (kredensial benar) | OWNER | 200 | 200 | ✅ |
 | POST `/auth/login` (kredensial benar) | SUPER_ADMIN | 200 | 200 | ✅ |
-| POST `/auth/login` (password salah) | — | 401 | 401 | ✅ |
+| POST `/auth/login` (password salah, ≥6 char) | — | 401 | 401 | ✅ |
+| POST `/auth/register` (Owner baru) | publik | 201 | 201 | ✅ |
+| ↳ role hasil = `OWNER` + auto-login (JWT) | — | OWNER | OWNER | ✅ |
+| ↳ langganan `FREE` dibuat otomatis (cek `GET /billing/me`) | — | ada | ada | ✅ |
+| POST `/auth/register` (email duplikat) | publik | 400 | 400 | ✅ |
+| POST `/auth/google` (tanpa `GOOGLE_CLIENT_ID`) | publik | 400 | 400 | ✅ |
 | GET `/auth/me` (token valid) | OWNER | 200 | 200 | ✅ |
 | GET `/auth/me` (tanpa token) | — | 401 | 401 | ✅ |
 

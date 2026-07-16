@@ -102,9 +102,10 @@ export class AiController {
   async analyzeServer(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Body() body: { provider: string },
+    @Body() body?: { provider?: string },
   ) {
-    return this.aiService.analyzeServer(id, body.provider, user);
+    // Body & provider opsional — service jatuh ke default env (gemini) bila kosong.
+    return this.aiService.analyzeServer(id, body?.provider ?? '', user);
   }
 
   /**
