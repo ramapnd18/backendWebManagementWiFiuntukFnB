@@ -59,24 +59,46 @@ async function main() {
   // ─── 4. Paket Langganan (Plan) ──────────────────────────────────────────────
   const freePlan = await prisma.plan.upsert({
     where: { code: 'FREE' },
-    update: { name: 'Gratis', maxRouters: 1, price: 0, durationDays: null },
+    update: {
+      name: 'Gratis',
+      maxRouters: 1,
+      maxTeknisi: 1,
+      price: 0,
+      durationDays: null,
+      aiAccess: false,
+      apiKeyAccess: false,
+    },
     create: {
       code: 'FREE',
       name: 'Gratis',
       maxRouters: 1,
+      maxTeknisi: 1,
       price: 0,
       durationDays: null, // tanpa kadaluarsa
+      aiAccess: false,
+      apiKeyAccess: false,
     },
   });
   await prisma.plan.upsert({
     where: { code: 'STANDARD' },
-    update: { name: 'Standar', maxRouters: 5, price: 50000, durationDays: 30 },
+    update: {
+      name: 'Standar',
+      maxRouters: 5,
+      maxTeknisi: 3,
+      price: 50000,
+      durationDays: 30,
+      aiAccess: true,
+      apiKeyAccess: true,
+    },
     create: {
       code: 'STANDARD',
       name: 'Standar',
       maxRouters: 5,
+      maxTeknisi: 3,
       price: 50000, // Rp50.000 (placeholder, bisa diubah)
       durationDays: 30,
+      aiAccess: true,
+      apiKeyAccess: true,
     },
   });
 

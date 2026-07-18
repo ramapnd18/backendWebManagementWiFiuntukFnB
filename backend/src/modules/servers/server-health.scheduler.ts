@@ -25,6 +25,8 @@ export class ServerHealthScheduler implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ServerHealthScheduler.name);
   private timer?: ReturnType<typeof setInterval>;
   private isRunning = false; // cegah tick tumpang-tindih bila 1 putaran lambat
+  private tickCount = 0; // untuk menjadwalkan prune retensi secara berkala
+  private retentionDays = 30; // simpan histori healthcheck N hari (env HEALTH_RETENTION_DAYS)
 
   constructor(
     private readonly configService: ConfigService,
@@ -41,6 +43,13 @@ export class ServerHealthScheduler implements OnModuleInit, OnModuleDestroy {
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
       this.logger.log('Health scheduler dinonaktifkan (interval <= 0).');
       return;
+    }
+
+    const retention = Number(
+      this.configService.get<string>('HEALTH_RETENTION_DAYS') ?? 30,
+    );
+    if (Number.isFinite(retention) && retention > 0) {
+      this.retentionDays = retention;
     }
 
     this.logger.log(`Health scheduler aktif: ping router tiap ${intervalMs}ms.`);
@@ -73,10 +82,21 @@ export class ServerHealthScheduler implements OnModuleInit, OnModuleDestroy {
               server.useSSL,
             );
             const lastStatus = result.success ? 'ONLINE' : 'OFFLINE';
+            const checkedAt = new Date();
 
             await this.prisma.mikrotikServer.update({
               where: { id: server.id },
-              data: { lastStatus, lastCheckedAt: new Date() },
+              data: { lastStatus, lastCheckedAt: checkedAt },
+            });
+
+            // Catat SETIAP hasil cek (OK maupun gagal) sebagai histori penuh (B2).
+            await this.prisma.routerHealthCheck.create({
+              data: {
+                serverId: server.id,
+                status: lastStatus,
+                latencyMs: result.success ? result.latency : null,
+                checkedAt,
+              },
             });
 
             // Catat log HANYA saat status berubah ONLINE→OFFLINE (hindari spam tiap tick).
@@ -98,6 +118,13 @@ export class ServerHealthScheduler implements OnModuleInit, OnModuleDestroy {
           }
         }),
       );
+
+      // Retensi: prune histori healthcheck lama secara berkala (tiap ~120 tick,
+      // ≈ 1 jam pada interval default 30s) agar tabel tak membengkak.
+      this.tickCount += 1;
+      if (this.tickCount % 120 === 1) {
+        await this.pruneOldHealthChecks();
+      }
     } catch (err) {
       this.logger.error(
         `Health scheduler tick gagal: ${
@@ -106,6 +133,29 @@ export class ServerHealthScheduler implements OnModuleInit, OnModuleDestroy {
       );
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  /** Hapus histori healthcheck yang lebih tua dari `retentionDays`. */
+  private async pruneOldHealthChecks() {
+    const cutoff = new Date(
+      Date.now() - this.retentionDays * 24 * 60 * 60 * 1000,
+    );
+    try {
+      const { count } = await this.prisma.routerHealthCheck.deleteMany({
+        where: { checkedAt: { lt: cutoff } },
+      });
+      if (count > 0) {
+        this.logger.log(
+          `Prune histori healthcheck: ${count} baris < ${this.retentionDays} hari dihapus.`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Gagal prune histori healthcheck: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 }

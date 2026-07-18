@@ -73,7 +73,7 @@ model MikrotikServer {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner           User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   profiles        HotspotProfile[]
   vouchers        Voucher[]
   logs            ActivityLog[]
@@ -81,9 +81,25 @@ model MikrotikServer {
   posApiKeys      PosApiKey[]
   posTransactions PosTransaction[]
   chatSessions    AiChatSession[]
+  healthChecks    RouterHealthCheck[]
 
   @@index([ownerId])
   @@map("mikrotik_servers")
+}
+
+// Histori healthcheck router: 1 baris per hasil cek periodik (OK maupun gagal),
+// diisi oleh ServerHealthScheduler. Dipakai untuk timeline uptime Monitoring Outlet.
+model RouterHealthCheck {
+  id        String       @id @default(cuid())
+  serverId  String
+  status    ServerStatus // hasil cek: ONLINE | OFFLINE
+  latencyMs Int? // latensi (ms) bila ONLINE
+  checkedAt DateTime     @default(now())
+
+  server MikrotikServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, checkedAt])
+  @@map("router_health_checks")
 }
 
 enum ServerStatus {
@@ -349,8 +365,11 @@ model Plan {
   code         String   @unique // stabil utk lookup: FREE | STANDARD
   name         String // tampilan: "Gratis" | "Standar"
   maxRouters   Int // batas jumlah router
+  maxTeknisi   Int      @default(0) // batas jumlah teknisi
   price        Int // harga dalam Rupiah (0 = gratis)
   durationDays Int? // masa berlaku; null = tanpa kadaluarsa (paket gratis)
+  aiAccess     Boolean  @default(false) // akses fitur AI (analisis + chat)
+  apiKeyAccess Boolean  @default(false) // boleh buat POS API key / integrasi
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

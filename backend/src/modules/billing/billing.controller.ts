@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -15,6 +16,7 @@ import {
 } from '@nestjs/swagger';
 import { BillingService } from './billing.service.js';
 import { CheckoutDto } from './dto/checkout.dto.js';
+import { ListInvoicesDto } from './dto/list-invoices.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -45,6 +47,19 @@ export class BillingController {
   @ApiResponse({ status: 200, description: 'Status langganan berhasil diambil' })
   async getMyStatus(@CurrentUser() user: AuthUser) {
     return this.billingService.getMyStatus(user);
+  }
+
+  @Get('invoices')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Riwayat invoice/pembayaran (Owner)' })
+  @ApiResponse({ status: 200, description: 'Riwayat invoice berhasil diambil' })
+  async getInvoices(
+    @CurrentUser() user: AuthUser,
+    @Query() query: ListInvoicesDto,
+  ) {
+    return this.billingService.getInvoices(user, query.skip, query.take);
   }
 
   @Post('checkout')

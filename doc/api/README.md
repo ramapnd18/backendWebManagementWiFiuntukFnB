@@ -19,6 +19,7 @@ Untuk katalog ringkas seluruh endpoint dalam satu tempat, lihat [`../BACKEND.md`
 | Billing, Kuota & Duitku | [`billing.md`](./billing.md) | [`billing-test-results.md`](./billing-test-results.md) |
 | Activity Log (aktivitas umum + riwayat koneksi router) | [`activity-log.md`](./activity-log.md) | (di dalam `activity-log.md` §Hasil Uji) |
 | Integrasi POS (voucher on-demand + riwayat) | [`pos.md`](./pos.md) | [`pos-test-results.md`](./pos-test-results.md) · [`pos-testing.md`](./pos-testing.md) (panduan manual) |
+| **Kebutuhan Frontend 2026-07-18** (Kelola Plan `/plans`, Kelola Owner `/admin/owners`, POS stats, Monitoring `/health`, invoice, enforcement paket) | [`fe-requirements-2026-07-18.md`](./fe-requirements-2026-07-18.md) | (kontrak + hasil uji dalam file yang sama) |
 
 > Uji runtime terakhir **2026-07-16** dijalankan terhadap router nyata **MikroTik CHR 7.19.3** (RouterOS API binary), backend prod build, PostgreSQL + Redis (Docker).
 

@@ -8,9 +8,15 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MikrotikService } from '../mikrotik/mikrotik.service.js';
-import { type AuthUser, assertOwnerAccess } from '../../common/scope.util.js';
+import {
+  type AuthUser,
+  assertOwnerAccess,
+  serverScopeWhere,
+} from '../../common/scope.util.js';
+import { HealthLogDto, HealthSummaryDto } from './dto/health-log.dto.js';
 
 @Injectable()
 export class MonitoringService {
@@ -162,5 +168,98 @@ export class MonitoringService {
     } catch (error: any) {
       this.routerUnreachable(serverId, 'Pantau traffic', error);
     }
+  }
+
+  /**
+   * Histori healthcheck penuh (B2) — SETIAP hasil cek periodik (ONLINE & OFFLINE)
+   * dari `ServerHealthScheduler`. Ter-scope per Owner via relasi server → ownerId.
+   * Return { data, meta:{ total, skip, take } }.
+   */
+  async getHealthLogs(user: AuthUser, params: HealthLogDto = {}) {
+    const { serverId, from, to, skip = 0, take = 50 } = params;
+
+    const where: Prisma.RouterHealthCheckWhereInput = {
+      server: serverScopeWhere(user),
+    };
+    if (serverId) where.serverId = serverId;
+    if (from || to) {
+      where.checkedAt = {};
+      if (from) where.checkedAt.gte = new Date(from);
+      if (to) where.checkedAt.lte = new Date(to);
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.routerHealthCheck.findMany({
+        where,
+        include: { server: { select: { name: true } } },
+        orderBy: { checkedAt: 'desc' },
+        skip: Number(skip),
+        take: Number(take),
+      }),
+      this.prisma.routerHealthCheck.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r) => ({
+        id: r.id,
+        serverId: r.serverId,
+        serverName: r.server.name,
+        status: r.status,
+        latencyMs: r.latencyMs,
+        checkedAt: r.checkedAt,
+      })),
+      meta: { total, skip: Number(skip), take: Number(take) },
+    };
+  }
+
+  /**
+   * Agregat uptime per hari (B2, opsional) untuk timeline dashboard.
+   * downtimeMinutes diperkirakan dari proporsi kegagalan terhadap total cek
+   * (fails/checks × 1440) agar tak bergantung pada interval scheduler.
+   */
+  async getHealthSummary(user: AuthUser, params: HealthSummaryDto = {}) {
+    const { serverId, days = 30 } = params;
+    const scope = serverScopeWhere(user); // { ownerId? }
+
+    const from = new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000);
+
+    const conditions: Prisma.Sql[] = [Prisma.sql`h."checkedAt" >= ${from}`];
+    if (scope.ownerId) conditions.push(Prisma.sql`s."ownerId" = ${scope.ownerId}`);
+    if (serverId) conditions.push(Prisma.sql`h."serverId" = ${serverId}`);
+
+    const rows = await this.prisma.$queryRaw<
+      { date: Date; checks: number; fails: number }[]
+    >(
+      Prisma.sql`
+        SELECT date_trunc('day', h."checkedAt") AS date,
+               COUNT(*)::int AS checks,
+               COUNT(*) FILTER (WHERE h.status::text = 'OFFLINE')::int AS fails
+        FROM router_health_checks h
+        JOIN mikrotik_servers s ON s.id = h."serverId"
+        WHERE ${Prisma.join(conditions, ' AND ')}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+    );
+
+    return {
+      data: rows.map((r) => {
+        const checks = Number(r.checks);
+        const fails = Number(r.fails);
+        const uptimePct =
+          checks > 0
+            ? Math.round(((checks - fails) / checks) * 100 * 100) / 100
+            : 0;
+        const downtimeMinutes =
+          checks > 0 ? Math.round((fails / checks) * 1440) : 0;
+        return {
+          date: new Date(r.date).toISOString().slice(0, 10),
+          checks,
+          fails,
+          uptimePct,
+          downtimeMinutes,
+        };
+      }),
+    };
   }
 }

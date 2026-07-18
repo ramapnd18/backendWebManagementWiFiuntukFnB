@@ -14,6 +14,8 @@ import { ActivityLogModule } from './modules/activity-log/activity-log.module.js
 import { PosModule } from './modules/pos/pos.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { BillingModule } from './modules/billing/billing.module.js';
+import { PlansModule } from './modules/plans/plans.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import appConfig from './config/app.config.js';
 import databaseConfig from './config/database.config.js';
 import jwtConfig from './config/jwt.config.js';
@@ -52,6 +54,8 @@ import aiConfig from './config/ai.config.js';
     PosModule,
     UsersModule,
     BillingModule,
+    PlansModule,
+    AdminModule,
   ],
   providers: [
     // Rate limiting global — terapkan ThrottlerGuard ke semua route

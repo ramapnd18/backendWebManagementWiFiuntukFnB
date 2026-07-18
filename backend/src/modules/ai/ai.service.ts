@@ -6,7 +6,9 @@ import {
   type AuthUser,
   serverScopeWhere,
   assertOwnerAccess,
+  effectiveOwnerId,
 } from '../../common/scope.util.js';
+import { BillingService } from '../billing/billing.service.js';
 
 @Injectable()
 export class AiService {
@@ -14,7 +16,20 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly mikrotikService: MikrotikService,
     private readonly activityLogService: ActivityLogService,
+    private readonly billingService: BillingService,
   ) {}
+
+  /**
+   * Pastikan paket Owner mengizinkan fitur AI. SUPER_ADMIN dilewati (tak punya
+   * langganan). Dipanggil di awal aksi AI yang mengonsumsi LLM (analyze/chat).
+   */
+  private async assertAiAccess(user: AuthUser): Promise<void> {
+    if (user.role === 'SUPER_ADMIN') return;
+    await this.billingService.assertFeatureAccess(
+      effectiveOwnerId(user),
+      'aiAccess',
+    );
+  }
 
   /**
    * Menghasilkan prompt AI berdasarkan konfigurasi
@@ -156,6 +171,7 @@ ${configJson}`;
    * Ambil konfigurasi hotspot dari MikroTik dan kirim ke LLM untuk dianalisis.
    */
   async analyzeServer(serverId: string, provider: string, user: AuthUser): Promise<any> {
+    await this.assertAiAccess(user);
 
     const server = await this.prisma.mikrotikServer.findUnique({
       where: { id: serverId },
@@ -419,6 +435,8 @@ ${configJson}`;
     },
     user: AuthUser,
   ) {
+    await this.assertAiAccess(user);
+
     // 1. Validasi & scoping router (bila ada)
     if (dto.serverId) {
       const server = await this.prisma.mikrotikServer.findUnique({

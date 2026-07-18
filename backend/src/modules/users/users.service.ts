@@ -68,6 +68,11 @@ export class UsersService {
       }
     }
 
+    // Kuota teknisi per paket langganan Owner (tolak bila penuh / langganan kadaluarsa)
+    if (role === 'TEKNISI' && ownerId) {
+      await this.billingService.assertCanAddTeknisi(ownerId);
+    }
+
     const hashed = await bcrypt.hash(dto.password, 12);
 
     try {

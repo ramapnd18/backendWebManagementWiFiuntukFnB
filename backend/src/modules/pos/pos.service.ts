@@ -15,8 +15,10 @@ import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MikrotikService } from '../mikrotik/mikrotik.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
+import { Prisma } from '@prisma/client';
 import { TriggerVoucherDto } from './dto/trigger-voucher.dto.js';
 import { ListPosTransactionsDto } from './dto/list-pos-transactions.dto.js';
+import { PosStatsDto } from './dto/pos-stats.dto.js';
 import { generateNumericCode } from './pos.util.js';
 import { serverScopeWhere, type AuthUser } from '../../common/scope.util.js';
 
@@ -80,6 +82,63 @@ export class PosService {
       data,
       meta: { total, skip: Number(skip), take: Number(take) },
     };
+  }
+
+  /**
+   * Agregat jumlah transaksi POS per hari (SEMUA status: SUCCESS + FAILED).
+   * Ter-scope per Owner via relasi server → ownerId. Tanggal kosong diisi 0
+   * agar chart rapi. Default rentang 30 hari terakhir.
+   */
+  async dailyTransactionStats(user: AuthUser, params: PosStatsDto = {}) {
+    const scope = serverScopeWhere(user); // { ownerId? } — SA: {}
+
+    // Normalisasi rentang ke batas hari (UTC, konsisten dgn date_trunc di DB)
+    const startOfDay = (d: Date) =>
+      new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const now = new Date();
+    const to = params.to ? new Date(params.to) : now;
+    const from = params.from
+      ? new Date(params.from)
+      : new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
+    const fromDay = startOfDay(from);
+    const toDay = startOfDay(to);
+    // Batas atas eksklusif = awal hari berikutnya dari `toDay`
+    const toExclusive = new Date(toDay.getTime() + 24 * 60 * 60 * 1000);
+
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`t."createdAt" >= ${fromDay}`,
+      Prisma.sql`t."createdAt" < ${toExclusive}`,
+    ];
+    if (scope.ownerId) conditions.push(Prisma.sql`s."ownerId" = ${scope.ownerId}`);
+    if (params.serverId) conditions.push(Prisma.sql`t."serverId" = ${params.serverId}`);
+
+    const rows = await this.prisma.$queryRaw<{ date: Date; count: number }[]>(
+      Prisma.sql`
+        SELECT date_trunc('day', t."createdAt") AS date, COUNT(*)::int AS count
+        FROM pos_transactions t
+        JOIN mikrotik_servers s ON s.id = t."serverId"
+        WHERE ${Prisma.join(conditions, ' AND ')}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+    );
+
+    const key = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(key(new Date(r.date)), Number(r.count));
+
+    // Isi setiap hari dalam rentang (termasuk yang 0)
+    const data: { date: string; count: number }[] = [];
+    for (
+      let d = new Date(fromDay);
+      d <= toDay;
+      d = new Date(d.getTime() + 24 * 60 * 60 * 1000)
+    ) {
+      const k = key(d);
+      data.push({ date: k, count: counts.get(k) ?? 0 });
+    }
+
+    return { data };
   }
 
   /**

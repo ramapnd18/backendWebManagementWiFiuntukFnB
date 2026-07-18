@@ -125,6 +125,27 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | GET | `/monitoring/active/:serverId` | TEKNISI, SUPER_ADMIN | User hotspot aktif |
 | GET | `/monitoring/resources/:serverId` | TEKNISI, SUPER_ADMIN | CPU/RAM/HDD/uptime |
 | GET | `/monitoring/traffic/:serverId` | OWNER, TEKNISI, SUPER_ADMIN | RX/TX per interface (Owner read-only) |
+| GET | `/monitoring/health?serverId=&from=&to=&skip=&take=` | OWNER, TEKNISI, SUPER_ADMIN | **Histori healthcheck penuh** (setiap cek ONLINE/OFFLINE dari scheduler), ter-scope. `{data,meta}` |
+| GET | `/monitoring/health/summary?serverId=&days=30` | OWNER, TEKNISI, SUPER_ADMIN | Agregat uptime per hari (`checks/fails/uptimePct/downtimeMinutes`) |
+
+> Histori diisi `ServerHealthScheduler` (setInterval, default 30s) ke tabel `router_health_checks`, dengan **retensi** default 30 hari (`HEALTH_RETENTION_DAYS`). Beda dari `/activity-log/router-connections` yang hanya mencatat kegagalan.
+
+### Plans (kelola paket — SA) — `/api/plans`
+| Verb | Path | Role | Keterangan |
+|------|------|------|------------|
+| GET | `/plans` | SUPER_ADMIN | Semua paket (termasuk non-aktif) |
+| GET | `/plans/:id` | SUPER_ADMIN | Detail paket |
+| POST | `/plans` | SUPER_ADMIN | Buat paket (`code` unik) |
+| PATCH | `/plans/:id` | SUPER_ADMIN | Update (partial) |
+| DELETE | `/plans/:id` | SUPER_ADMIN | Soft-delete bila masih dipakai; hard-delete bila tidak. Paket `FREE` dilindungi (400) |
+
+> Beda dari `GET /billing/plans` (list paket **aktif** untuk owner upgrade). Field paket: `maxRouters, maxTeknisi, price, durationDays, aiAccess, apiKeyAccess, isActive`.
+
+### Admin (kelola Owner — SA) — `/api/admin`
+| Verb | Path | Role | Keterangan |
+|------|------|------|------------|
+| GET | `/admin/owners?skip=&take=&search=&planCode=` | SUPER_ADMIN | Daftar Owner + agregat (`teknisiCount/routerCount/posCount/plan`). `{data,meta}` |
+| GET | `/admin/owners/:id` | SUPER_ADMIN | Detail owner (subscription, usage kuota, monitoring outlet) |
 
 ### AI — `/api/ai`
 | Verb | Path | Role | Keterangan |
@@ -144,10 +165,11 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | Verb | Path | Role | Keterangan |
 |------|------|------|------------|
 | GET | `/billing/plans` | semua | Daftar paket langganan aktif |
-| GET | `/billing/me` | OWNER, TEKNISI | Status langganan + pemakaian kuota router |
+| GET | `/billing/me` | OWNER, TEKNISI | Status langganan + **pemakaian kuota router & teknisi** + flag `aiAccess`/`apiKeyAccess` (di `usage`) |
+| GET | `/billing/invoices?skip=&take=` | OWNER | Riwayat invoice/pembayaran (dari `PaymentTransaction`). `{data,meta}` |
 | POST | `/billing/checkout` | OWNER | Buat invoice upgrade via Duitku → `paymentUrl`. Tanpa kredensial → 503 |
 | POST | `/billing/duitku/callback` | **publik** | Webhook Duitku — validasi signature (MD5) + idempoten |
-> Kuota router ditegakkan di `POST /servers` (`assertCanAddRouter`) → penuh/kadaluarsa **403**. Detail: `doc/api/billing.md`.
+> Penegakan kuota/fitur per paket (`getEffectiveLimit`): router di `POST /servers` (`assertCanAddRouter`), **teknisi** di `POST /users` (`assertCanAddTeknisi`), **fitur AI** di `/ai/analyze`+`/ai/chat` (`aiAccess`), **POS API key** di `POST /pos-keys` (`apiKeyAccess`) — semua → **403** bila penuh/kadaluarsa/tak termasuk paket. `billing/me` mempertahankan field lama (`maxRouters/used/remaining`) demi backward-compat. Detail: `doc/api/billing.md`.
 
 ### Activity Log — `/api/activity-log`
 | Verb | Path | Role | Keterangan |
@@ -161,6 +183,7 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | Verb | Path | Role | Keterangan |
 |------|------|------|------------|
 | GET | `/pos/transactions?skip=&take=&serverId=&status=&search=` | OWNER, TEKNISI, SUPER_ADMIN | Riwayat transaksi POS ter-scope per Owner (include server/profil/voucher). Detail: [`api/pos.md`](./api/pos.md) |
+| GET | `/pos/transactions/stats?groupBy=day&from=&to=&serverId=` | OWNER, TEKNISI, SUPER_ADMIN | **Agregat harian** (COUNT semua status SUCCESS+FAILED per hari), ter-scope. Tanggal kosong diisi 0. Default 30 hari |
 
 > Endpoint POS `x-api-key` (mesin kasir) ada di §6.1 & [`api/pos.md`](./api/pos.md); ini endpoint **JWT** untuk panel admin.
 

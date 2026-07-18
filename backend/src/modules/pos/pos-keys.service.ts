@@ -5,9 +5,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
+import { BillingService } from '../billing/billing.service.js';
 import { generatePosApiKey, maskApiKey } from './pos.util.js';
 import {
   assertOwnerAccess,
+  effectiveOwnerId,
   serverScopeWhere,
   type AuthUser,
 } from '../../common/scope.util.js';
@@ -24,6 +26,7 @@ export class PosKeysService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLogService: ActivityLogService,
+    private readonly billingService: BillingService,
   ) {}
 
   /**
@@ -42,6 +45,14 @@ export class PosKeysService {
     }
     // Cegah buat key untuk router milik owner lain
     assertOwnerAccess(user, server.ownerId);
+
+    // Fitur POS API key harus termasuk dalam paket Owner (SUPER_ADMIN dilewati)
+    if (user.role !== 'SUPER_ADMIN') {
+      await this.billingService.assertFeatureAccess(
+        effectiveOwnerId(user),
+        'apiKeyAccess',
+      );
+    }
 
     const { rawKey, keyHash, prefix } = generatePosApiKey();
 

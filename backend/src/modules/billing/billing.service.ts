@@ -46,6 +46,9 @@ export class BillingService {
    */
   async getEffectiveLimit(ownerId: string): Promise<{
     maxRouters: number;
+    maxTeknisi: number;
+    aiAccess: boolean;
+    apiKeyAccess: boolean;
     expiredAt: Date | null;
     planCode: string;
     planName: string;
@@ -57,6 +60,9 @@ export class BillingService {
     if (sub) {
       return {
         maxRouters: sub.plan.maxRouters,
+        maxTeknisi: sub.plan.maxTeknisi,
+        aiAccess: sub.plan.aiAccess,
+        apiKeyAccess: sub.plan.apiKeyAccess,
         expiredAt: sub.expiredAt,
         planCode: sub.plan.code,
         planName: sub.plan.name,
@@ -77,6 +83,9 @@ export class BillingService {
     const free = await this.prisma.plan.findUnique({ where: { code: 'FREE' } });
     return {
       maxRouters: free?.maxRouters ?? 1,
+      maxTeknisi: free?.maxTeknisi ?? 0,
+      aiAccess: free?.aiAccess ?? false,
+      apiKeyAccess: free?.apiKeyAccess ?? false,
       expiredAt: isExpired ? (lapsed?.expiredAt ?? null) : null,
       planCode: 'FREE',
       planName: free?.name ?? 'Gratis',
@@ -110,21 +119,113 @@ export class BillingService {
     }
   }
 
+  /**
+   * Validasi kuota saat menambah teknisi. Dipanggil dari UsersService.create.
+   * Tolak bila langganan kadaluarsa atau jumlah teknisi sudah mencapai batas.
+   */
+  async assertCanAddTeknisi(ownerId: string): Promise<void> {
+    const limit = await this.getEffectiveLimit(ownerId);
+
+    if (limit.expired) {
+      const tgl = limit.expiredAt
+        ? new Date(limit.expiredAt).toLocaleDateString('id-ID')
+        : '-';
+      throw new ForbiddenException(
+        `Langganan ${limit.expiredPlanName} Anda sudah kadaluarsa (${tgl}). Perpanjang paket untuk menambah teknisi.`,
+      );
+    }
+
+    const count = await this.prisma.user.count({
+      where: { ownerId, role: 'TEKNISI' },
+    });
+    if (count >= limit.maxTeknisi) {
+      throw new ForbiddenException(
+        `Kuota teknisi penuh (${count}/${limit.maxTeknisi}). Upgrade paket untuk menambah teknisi.`,
+      );
+    }
+  }
+
+  /**
+   * Pastikan Owner punya akses fitur (aiAccess / apiKeyAccess) sesuai paket.
+   * Dipakai guard/service AI & POS API key. Lempar 403 bila tidak diizinkan.
+   */
+  async assertFeatureAccess(
+    ownerId: string,
+    feature: 'aiAccess' | 'apiKeyAccess',
+  ): Promise<void> {
+    const limit = await this.getEffectiveLimit(ownerId);
+    if (!limit[feature]) {
+      const label =
+        feature === 'aiAccess' ? 'fitur AI' : 'pembuatan POS API key';
+      throw new ForbiddenException(
+        `Paket ${limit.planName} Anda tidak termasuk ${label}. Upgrade paket untuk mengaksesnya.`,
+      );
+    }
+  }
+
   /** Status langganan + pemakaian kuota untuk Owner/Teknisi. */
   async getMyStatus(user: AuthUser) {
     const ownerId = effectiveOwnerId(user); // OWNER → dirinya; TEKNISI → Owner-nya
     const limit = await this.getEffectiveLimit(ownerId);
-    const used = await this.prisma.mikrotikServer.count({ where: { ownerId } });
+    const [used, teknisiUsed] = await Promise.all([
+      this.prisma.mikrotikServer.count({ where: { ownerId } }),
+      this.prisma.user.count({ where: { ownerId, role: 'TEKNISI' } }),
+    ]);
     const subscription = await this.getActiveSubscription(ownerId);
     return {
-      plan: { code: limit.planCode, name: limit.planName },
+      plan: {
+        code: limit.planCode,
+        name: limit.planName,
+        maxRouters: limit.maxRouters,
+        maxTeknisi: limit.maxTeknisi,
+        aiAccess: limit.aiAccess,
+        apiKeyAccess: limit.apiKeyAccess,
+      },
+      // Field lama dipertahankan agar FE lama tak pecah (backward-compat).
       maxRouters: limit.maxRouters,
       used,
       remaining: Math.max(0, limit.maxRouters - used),
       expiredAt: limit.expiredAt,
       expired: limit.expired,
       expiredPlanName: limit.expiredPlanName,
+      usage: {
+        routers: { used, max: limit.maxRouters },
+        teknisi: { used: teknisiUsed, max: limit.maxTeknisi },
+        aiAccess: limit.aiAccess,
+        apiKeyAccess: limit.apiKeyAccess,
+      },
       subscription,
+    };
+  }
+
+  /** Riwayat invoice (PaymentTransaction) milik Owner. Return { data, meta }. */
+  async getInvoices(user: AuthUser, skip = 0, take = 10) {
+    const userId = effectiveOwnerId(user);
+    const where = { userId };
+    const [rows, total] = await Promise.all([
+      this.prisma.paymentTransaction.findMany({
+        where,
+        include: { plan: { select: { code: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: Number(skip),
+        take: Number(take),
+      }),
+      this.prisma.paymentTransaction.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((tx) => ({
+        id: tx.id,
+        merchantOrderId: tx.merchantOrderId,
+        plan: tx.plan,
+        amount: tx.amount,
+        status: tx.status,
+        paymentMethod: tx.paymentMethod,
+        paidAt: tx.paidAt,
+        createdAt: tx.createdAt,
+        paymentUrl: tx.paymentUrl,
+      })),
+      meta: { total, skip: Number(skip), take: Number(take) },
     };
   }
 

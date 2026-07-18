@@ -1,10 +1,11 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { MonitoringService } from './monitoring.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { type AuthUser } from '../../common/scope.util.js';
+import { HealthLogDto, HealthSummaryDto } from './dto/health-log.dto.js';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -18,6 +19,36 @@ import {
 @Controller('monitoring')
 export class MonitoringController {
   constructor(private readonly monitoringService: MonitoringService) {}
+
+  @Get('health')
+  @ApiOperation({
+    summary: 'Histori healthcheck router (log penuh, ter-scope, pagination)',
+    description:
+      'Setiap hasil cek periodik (ONLINE & OFFLINE) yang dicatat health scheduler. Beda dari activity-log yang hanya mencatat kegagalan.',
+  })
+  @ApiResponse({ status: 200, description: 'Histori healthcheck berhasil diambil.' })
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
+  async getHealthLogs(
+    @CurrentUser() user: AuthUser,
+    @Query() query: HealthLogDto,
+  ) {
+    return this.monitoringService.getHealthLogs(user, query);
+  }
+
+  @Get('health/summary')
+  @ApiOperation({
+    summary: 'Agregat uptime healthcheck per hari (ter-scope)',
+    description:
+      'Ringkasan per hari: jumlah cek, kegagalan, persentase uptime, estimasi downtime (menit).',
+  })
+  @ApiResponse({ status: 200, description: 'Ringkasan uptime berhasil diambil.' })
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
+  async getHealthSummary(
+    @CurrentUser() user: AuthUser,
+    @Query() query: HealthSummaryDto,
+  ) {
+    return this.monitoringService.getHealthSummary(user, query);
+  }
 
   @Get('snapshot/:serverId')
   @ApiOperation({

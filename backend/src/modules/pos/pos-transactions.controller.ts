@@ -12,6 +12,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { type AuthUser } from '../../common/scope.util.js';
 import { PosService } from './pos.service.js';
 import { ListPosTransactionsDto } from './dto/list-pos-transactions.dto.js';
+import { PosStatsDto } from './dto/pos-stats.dto.js';
 
 /**
  * Riwayat transaksi POS untuk panel admin (JWT). Terpisah dari `PosController`
@@ -35,5 +36,14 @@ export class PosTransactionsController {
     @Query() query: ListPosTransactionsDto,
   ) {
     return this.posService.listTransactions(user, query);
+  }
+
+  @Get('stats')
+  @ApiOperation({
+    summary: 'Agregat transaksi POS per hari (chart) — semua status, ter-scope',
+  })
+  @ApiResponse({ status: 200, description: 'Agregat harian berhasil diambil' })
+  async stats(@CurrentUser() user: AuthUser, @Query() query: PosStatsDto) {
+    return this.posService.dailyTransactionStats(user, query);
   }
 }

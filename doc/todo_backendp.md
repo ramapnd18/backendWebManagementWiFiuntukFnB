@@ -411,3 +411,23 @@ create(@CurrentUser() user, @Body() dto) { /* effectiveOwnerId(user) */ }
 **Uji menyeluruh 2026-06-29: 45/45 skenario lulus** (auth, users, enforcement, scoping) →
 `doc/api/rbac-test-results.md`. Sisa non-RBAC: dampak frontend (login shape `{user}` + halaman
 manajemen user), opsional enum `USER_*` untuk audit log.
+
+---
+
+## L. Batch Kebutuhan Frontend (2026-07-18) — ✅ SELESAI + DIUJI
+
+Sumber: [`doc/2026-07-17-peta-endpoint-backend-untuk-frontend.md`](./2026-07-17-peta-endpoint-backend-untuk-frontend.md).
+Kontrak + hasil uji: [`doc/api/fe-requirements-2026-07-18.md`](./api/fe-requirements-2026-07-18.md).
+
+- `(B)` **Schema**: `Plan += maxTeknisi/aiAccess/apiKeyAccess`; model baru `RouterHealthCheck` (+ index). Migrasi `20260718112056_plan_features_and_router_health`. Seed default paket diperbarui.
+- **A3** `/plans` CRUD (SA) — modul baru `plans`; soft/hard-delete; FREE dilindungi.
+- **A1/A2** `/admin/owners` + `/admin/owners/:id` (SA) — modul baru `admin` (agregat teknisi/router/pos + detail usage/monitoring).
+- **A4** `GET /pos/transactions/stats` — agregat harian (semua status, `date_trunc`, isi 0).
+- **B2** `GET /monitoring/health` + `/health/summary`; `ServerHealthScheduler` menulis histori tiap tick (ONLINE & OFFLINE) + retensi `HEALTH_RETENTION_DAYS` (default 30 hari).
+- **B1** `GET /billing/invoices` (OWNER) + `GET /billing/me` diperluas (`usage.teknisi` + flag `aiAccess/apiKeyAccess`), backward-compat dijaga.
+- **B3/B4** sudah ada sebelumnya → hanya diverifikasi (voucher OWNER read-only, `/auth/me` lengkap, `PATCH /users/:id`).
+- **Enforcement** limit paket baru: `assertCanAddTeknisi` (`POST /users`), `assertFeatureAccess('aiAccess')` (`/ai/analyze`+`/ai/chat`), `assertFeatureAccess('apiKeyAccess')` (`POST /pos-keys`). SUPER_ADMIN dilewati.
+
+**Verifikasi runtime 2026-07-18:** semua endpoint 200 sesuai kontrak; RBAC plans OWNER→403; enforcement owner FREE → AI 403, POS key 403, kuota teknisi 403; plan DELETE FREE→400. `npm run build` 0 error.
+
+> Konsekuensi diterima: default FREE `aiAccess/apiKeyAccess=false` → owner FREE lama kehilangan akses AI & pembuatan POS API key sampai upgrade.
