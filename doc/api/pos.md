@@ -208,3 +208,26 @@ curl -X POST http://localhost:4000/api/pos/v1/trigger-voucher \
   -H "x-api-key: pos_a1b2c3..." -H "Content-Type: application/json" \
   -d '{"transactionId":"TRX-001","profileId":"<id>","outletName":"Outlet A"}'
 ```
+
+---
+
+## Statistik Transaksi Harian (chart) — `GET /pos/transactions/stats`
+
+**Ditambahkan 2026-07-18** (sumber: [`../2026-07-17-peta-endpoint-backend-untuk-frontend.md`](../2026-07-17-peta-endpoint-backend-untuk-frontend.md) A4).
+**Auth:** JWT Bearer · **Role:** `OWNER` / `TEKNISI` / `SUPER_ADMIN` (ter-scope per Owner; SA global).
+
+Agregat jumlah transaksi POS **per hari** untuk chart dashboard (bukan data mentah).
+
+```
+GET /pos/transactions/stats?groupBy=day&from=&to=&serverId=
+```
+- `groupBy` saat ini hanya `day`. `from`/`to` ISO-8601 (opsional). `serverId` opsional (filter 1 outlet).
+- Menghitung **SEMUA status** (SUCCESS + FAILED), bucket `date_trunc('day', "createdAt")`.
+- Default rentang **30 hari terakhir** bila `from`/`to` kosong. Tanggal kosong diisi `count:0`.
+
+Response:
+```jsonc
+{ "data": [ { "date": "2026-07-01", "count": 42 }, { "date": "2026-07-02", "count": 0 } ] }
+```
+
+**Uji (2026-07-18):** OWNER **200** (30 baris terisi, tanggal kosong `count:0`) · TEKNISI **200** (ter-scope).

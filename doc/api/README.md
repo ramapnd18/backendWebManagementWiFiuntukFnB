@@ -16,10 +16,12 @@ Untuk katalog ringkas seluruh endpoint dalam satu tempat, lihat [`../BACKEND.md`
 | Monitoring (snapshot, active, resources, traffic) | [`monitoring.md`](./monitoring.md) | (di dalam `monitoring.md` §Hasil Uji) |
 | AI — Analisis konfigurasi & laporan | [`ai.md`](./ai.md) | (di dalam `ai.md` §Hasil Uji) |
 | AI Chat Widget (kontekstual, multi-turn) | [`ai-chat.md`](./ai-chat.md) | [`ai-chat-test-results.md`](./ai-chat-test-results.md) |
-| Billing, Kuota & Duitku | [`billing.md`](./billing.md) | [`billing-test-results.md`](./billing-test-results.md) |
+| Billing, Kuota & Duitku (+ invoice, `billing/me` diperluas, enforcement paket) | [`billing.md`](./billing.md) | [`billing-test-results.md`](./billing-test-results.md) |
+| Kelola Plan / paket langganan (CRUD — SUPER_ADMIN) | [`plans.md`](./plans.md) | (di dalam `plans.md` §Hasil Uji) |
+| Kelola Owner / tenant (agregat + detail — SUPER_ADMIN) | [`admin.md`](./admin.md) | (di dalam `admin.md` §Hasil Uji) |
 | Activity Log (aktivitas umum + riwayat koneksi router) | [`activity-log.md`](./activity-log.md) | (di dalam `activity-log.md` §Hasil Uji) |
 | Integrasi POS (voucher on-demand + riwayat) | [`pos.md`](./pos.md) | [`pos-test-results.md`](./pos-test-results.md) · [`pos-testing.md`](./pos-testing.md) (panduan manual) |
-| **Kebutuhan Frontend 2026-07-18** (Kelola Plan `/plans`, Kelola Owner `/admin/owners`, POS stats, Monitoring `/health`, invoice, enforcement paket) | [`fe-requirements-2026-07-18.md`](./fe-requirements-2026-07-18.md) | (kontrak + hasil uji dalam file yang sama) |
+| **Kebutuhan Frontend 2026-07-18** — ringkasan/peta 1 halaman (kontrak per-modul kini dipecah ke: [`plans.md`](./plans.md), [`admin.md`](./admin.md), [`pos.md`](./pos.md) §stats, [`billing.md`](./billing.md) §perluasan, [`monitoring.md`](./monitoring.md) §histori healthcheck) | [`fe-requirements-2026-07-18.md`](./fe-requirements-2026-07-18.md) | (ringkas + hasil uji dalam file yang sama) |
 
 > Uji runtime terakhir **2026-07-16** dijalankan terhadap router nyata **MikroTik CHR 7.19.3** (RouterOS API binary), backend prod build, PostgreSQL + Redis (Docker).
 

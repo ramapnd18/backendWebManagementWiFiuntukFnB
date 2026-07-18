@@ -166,3 +166,43 @@ Router uji `CHR-Lab` (dimiliki owner). Akun: admin (SUPER_ADMIN), owner (OWNER),
 | Traffic per-interface | `GET /monitoring/traffic/:id` | owner | **200** | Array interface `[{name:"ether1",rxByte,txByte,rxPacket,txPacket,...}]` |
 | Active users (Owner ditolak) | `GET /monitoring/active/:id` | owner | **403** | Owner tak boleh `active`/`resources`/`snapshot` |
 | Snapshot gabungan | `GET /monitoring/snapshot/:id` | teknisi | **200** | `{activeUsers:[],resources:{...},traffic:[...]}` |
+
+---
+
+## Histori Healthcheck (Monitoring Outlet) — 2026-07-18
+
+Sumber: [`../2026-07-17-peta-endpoint-backend-untuk-frontend.md`](../2026-07-17-peta-endpoint-backend-untuk-frontend.md) (B2).
+Berbeda dari endpoint real-time di atas: ini **histori tersimpan** dari cek periodik.
+
+**Scheduler** `ServerHealthScheduler` (`backend/src/modules/servers/server-health.scheduler.ts`)
+men-`testConnection` semua router tiap tick (default 30s, `SERVER_HEALTH_INTERVAL_MS`) lalu menulis
+**1 baris `RouterHealthCheck` per router untuk SETIAP hasil** (ONLINE **dan** OFFLINE) ke tabel
+`router_health_checks`. **Retensi** default 30 hari (`HEALTH_RETENTION_DAYS`), di-prune berkala.
+
+> Beda dari [`activity-log/router-connections`](./activity-log.md) yang **hanya** mencatat kegagalan.
+
+### `GET /monitoring/health` (OWNER/TEKNISI/SUPER_ADMIN, ter-scope)
+```
+GET /monitoring/health?serverId=&from=&to=&skip=&take=
+```
+```jsonc
+{
+  "data": [
+    { "id":"...", "serverId":"...", "serverName":"Outlet A",
+      "status":"ONLINE", "latencyMs":12, "checkedAt":"2026-07-18T10:31:00Z" }
+  ],
+  "meta": { "total": 4320, "skip": 0, "take": 50 }
+}
+```
+
+### `GET /monitoring/health/summary` (agregat uptime per hari)
+```
+GET /monitoring/health/summary?serverId=&days=30
+```
+```jsonc
+{ "data": [ { "date":"2026-07-18", "checks":1440, "fails":3, "uptimePct":99.79, "downtimeMinutes":3 } ] }
+```
+`downtimeMinutes ≈ (fails/checks) × 1440` (independen interval scheduler).
+
+**Uji (2026-07-18):** OWNER **200** (histori `CHR-Lab` tercatat, membuktikan cek gagal pun tersimpan) ·
+summary **200** (`uptimePct`, `downtimeMinutes`) · TEKNISI **200** (ter-scope).

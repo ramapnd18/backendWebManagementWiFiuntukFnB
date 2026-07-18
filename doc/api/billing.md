@@ -186,3 +186,60 @@ DUITKU_RETURN_URL=http://localhost:3100/billing/result
 Terbukti runtime: kuota free (1) blokir router ke-2 (403) → checkout (FREE 400, Teknisi 403) →
 callback signature salah 403 → callback valid 200 (langganan jadi STANDARD, batas 1→5, `expiredAt` +30 hari) →
 replay idempoten 200 → router ke-2 lolos (201). Build `npm run build` 0 error.
+
+---
+
+## Perluasan & Endpoint Baru (2026-07-18)
+
+Sumber: [`../2026-07-17-peta-endpoint-backend-untuk-frontend.md`](../2026-07-17-peta-endpoint-backend-untuk-frontend.md) (B1) +
+field paket baru dari [`plans.md`](./plans.md).
+
+### `GET /billing/me` — diperluas (OWNER/TEKNISI)
+`plan` kini memuat `maxRouters/maxTeknisi/aiAccess/apiKeyAccess`, dan ditambah blok `usage`:
+```jsonc
+{
+  "plan": { "code":"STANDARD","name":"Standar","maxRouters":5,"maxTeknisi":3,"aiAccess":true,"apiKeyAccess":true },
+  "usage": {
+    "routers": { "used":2, "max":5 },
+    "teknisi": { "used":3, "max":3 },
+    "aiAccess": true, "apiKeyAccess": true
+  },
+  "subscription": { ... },
+  // Field lama DIPERTAHANKAN (backward-compat): maxRouters, used, remaining, expiredAt, expired, expiredPlanName
+}
+```
+
+### `GET /billing/invoices?skip=&take=` — baru (OWNER)
+Riwayat invoice/pembayaran dari `PaymentTransaction`:
+```jsonc
+{
+  "data": [
+    { "id":"...", "merchantOrderId":"SUB-...", "plan":{"code":"STANDARD","name":"Standar"},
+      "amount":150000, "status":"PAID", "paymentMethod":"VA", "paidAt":"...",
+      "createdAt":"...", "paymentUrl":null }
+  ],
+  "meta": { "total":8, "skip":0, "take":10 }
+}
+```
+
+**Uji (2026-07-18):** `me` **200** (`usage.teknisi {used:2,max:1}`, flag false pada owner FREE) · `invoices` **200** (`{data:[],meta:{total:0}}`).
+
+---
+
+## Penegakan limit paket (enforcement)
+
+Reuse `BillingService.getEffectiveLimit`. Semua → **403** bila melebihi/kadaluarsa/tak termasuk paket.
+`SUPER_ADMIN` dilewati (tak punya langganan).
+
+| Limit | Titik penegakan | Helper |
+|-------|-----------------|--------|
+| Router | `POST /servers` | `assertCanAddRouter(ownerId)` |
+| Teknisi | `POST /users` (buat TEKNISI) | `assertCanAddTeknisi(ownerId)` |
+| Fitur AI | `POST /ai/servers/:id/analyze`, `POST /ai/chat` | `assertFeatureAccess(ownerId,'aiAccess')` |
+| POS API key | `POST /pos-keys` | `assertFeatureAccess(ownerId,'apiKeyAccess')` |
+
+**Uji owner FREE (2026-07-18):** AI chat **403** ("tidak termasuk fitur AI") · POS key **403**
+("tidak termasuk pembuatan POS API key") · buat teknisi **403** ("Kuota teknisi penuh (2/1)").
+
+> Konsekuensi: default FREE `aiAccess/apiKeyAccess=false` → owner FREE lama kehilangan akses AI &
+> pembuatan POS API key sampai upgrade paket.
