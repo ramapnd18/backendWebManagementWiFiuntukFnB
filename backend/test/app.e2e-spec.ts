@@ -13,14 +13,14 @@ describe('AppController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api'); // selaras dengan main.ts
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  // Catatan: AppModule tidak mendaftarkan AppController (tak ada route root).
+  // Smoke test: app boot + JwtAuthGuard aktif → endpoint terproteksi balas 401 tanpa token.
+  it('GET /api/billing/me tanpa token → 401', () => {
+    return request(app.getHttpServer()).get('/api/billing/me').expect(401);
   });
 
   afterEach(async () => {
