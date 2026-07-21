@@ -11,6 +11,12 @@ async function bootstrap() {
   // ─── Security Headers (helmet) ────────────────────────────────────────────
   app.use(helmet());
 
+  // ─── Graceful Shutdown ────────────────────────────────────────────────────
+  // Tanpa ini, onModuleDestroy TIDAK dipanggil saat platform deploy mengirim
+  // SIGTERM: pool Postgres, timer scheduler, dan koneksi antrean tak ditutup
+  // rapi sehingga tiap redeploy meninggalkan koneksi menggantung di sisi DB.
+  app.enableShutdownHooks();
+
   // ─── Global Prefix ────────────────────────────────────────────────────────
   app.setGlobalPrefix('api');
 

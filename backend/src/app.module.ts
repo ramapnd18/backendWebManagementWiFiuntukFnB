@@ -16,6 +16,7 @@ import { UsersModule } from './modules/users/users.module.js';
 import { BillingModule } from './modules/billing/billing.module.js';
 import { PlansModule } from './modules/plans/plans.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
+import { HealthModule } from './modules/health/health.module.js';
 import appConfig from './config/app.config.js';
 import jwtConfig from './config/jwt.config.js';
 import redisConfig from './config/redis.config.js';
@@ -54,6 +55,7 @@ import redisConfig from './config/redis.config.js';
     BillingModule,
     PlansModule,
     AdminModule,
+    HealthModule,
   ],
   providers: [
     // Rate limiting global — terapkan ThrottlerGuard ke semua route
