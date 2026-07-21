@@ -103,6 +103,49 @@ export class HealthService {
     return { host, port, dns: addresses, tcp, control443 };
   }
 
+  /**
+   * Uji egress umum ke internet, memakai IP mentah (tanpa DNS) agar hasilnya
+   * memisahkan masalah routing dari masalah resolusi nama.
+   *
+   * Gunanya membedakan dua kondisi yang gejalanya mirip:
+   * - hanya rute ke host DB yang hilang, atau
+   * - container memang tak punya egress sama sekali.
+   */
+  async probeInternet(): Promise<TcpProbe[]> {
+    return Promise.all([
+      this.probeTcp('1.1.1.1', 443), // Cloudflare HTTPS
+      this.probeTcp('8.8.8.8', 53), // Google DNS
+    ]);
+  }
+
+  /**
+   * Uji target tambahan dari env `DIAG_TARGETS` (format: "host:port,host:port").
+   *
+   * Sengaja dari env, BUKAN query param: nilainya hanya bisa diatur operator
+   * lewat dashboard, sehingga endpoint ini tetap tak bisa disalahgunakan
+   * sebagai port scanner oleh pengunjung. Dipakai untuk mencoba kandidat
+   * hostname internal database tanpa perlu build ulang.
+   */
+  async probeCustomTargets(): Promise<TcpProbe[]> {
+    const raw = process.env.DIAG_TARGETS;
+    if (!raw) return [];
+
+    const targets = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 5); // batasi agar respons tetap cepat
+
+    return Promise.all(
+      targets.map((t) => {
+        const idx = t.lastIndexOf(':');
+        const host = idx === -1 ? t : t.slice(0, idx);
+        const port = idx === -1 ? 5432 : Number(t.slice(idx + 1));
+        return this.probeTcp(host, Number.isFinite(port) ? port : 5432);
+      }),
+    );
+  }
+
   /** Ringkasan env penting — hanya status ada/tidak, nilainya tak pernah ditampilkan. */
   envPresence(): Record<string, boolean> {
     const keys = [

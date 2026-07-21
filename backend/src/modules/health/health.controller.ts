@@ -41,7 +41,11 @@ export class HealthController {
   })
   @ApiResponse({ status: 200, description: 'Hasil diagnostik.' })
   async checkDb() {
-    const network = await this.healthService.diagnoseDb();
+    const [network, internet, custom] = await Promise.all([
+      this.healthService.diagnoseDb(),
+      this.healthService.probeInternet(),
+      this.healthService.probeCustomTargets(),
+    ]);
 
     let query: { ok: boolean; error?: string };
     try {
@@ -51,6 +55,12 @@ export class HealthController {
       query = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
 
-    return { network, query, env: this.healthService.envPresence() };
+    return {
+      network,
+      internet,
+      custom,
+      query,
+      env: this.healthService.envPresence(),
+    };
   }
 }
