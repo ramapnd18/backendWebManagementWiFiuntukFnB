@@ -28,7 +28,8 @@ interface Sub {
  * dan klien tak perlu polling sendiri (freshness < interval).
  *
  * Cache snapshot disimpan in-memory (Map) — cukup untuk deployment single-instance.
- * Untuk scale horizontal (banyak instance), pindahkan cache + fan-out ke Redis pub/sub.
+ * Untuk scale horizontal (banyak instance), cache + fan-out perlu dipindah ke
+ * penyimpanan bersama dengan mekanisme pub/sub.
  */
 @Injectable()
 export class MonitoringPollerService implements OnModuleDestroy {

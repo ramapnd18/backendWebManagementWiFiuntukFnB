@@ -9,7 +9,8 @@
 ## 1. Gambaran Umum
 
 Backend adalah **monolith modular NestJS** ber-prefix `/api`, stateless terhadap router (koneksi
-per operasi), didukung PostgreSQL (data) + Redis (antrean). Terintegrasi 4 sistem eksternal:
+per operasi), didukung PostgreSQL (data **dan** antrean voucher batch — tabel `voucher_batches`).
+Tidak ada message broker/Redis. Terintegrasi 4 sistem eksternal:
 router MikroTik, LLM provider, Duitku (pembayaran), dan mesin POS.
 
 ---
@@ -22,10 +23,9 @@ graph TB
     POS[Mesin Kasir / POS]
     subgraph Backend["Backend NestJS (/api)"]
         API[REST API + Swagger]
-        Q[BullMQ Worker]
+        Q[VoucherBatchWorker<br/>poller in-process]
     end
-    DB[(PostgreSQL)]
-    RD[(Redis)]
+    DB[(PostgreSQL<br/>+ tabel voucher_batches)]
     MT[Router MikroTik<br/>RouterOS v6/v7]
     LLM[LLM Provider<br/>OpenRouter/Gemini/OpenAI/Anthropic]
     DK[Duitku Sandbox]
@@ -33,10 +33,9 @@ graph TB
     FE -->|JWT Bearer| API
     POS -->|x-api-key| API
     DK -->|webhook callback signed| API
-    API --> DB
-    API --> RD
-    Q --> RD
-    Q --> DB
+    API -->|INSERT batch PENDING| DB
+    Q -->|klaim FOR UPDATE SKIP LOCKED| DB
+    Q -->|simpan Voucher| DB
     API -->|API binary 8728/8729| MT
     Q -->|createHotspotUser| MT
     API -->|analyze / chat| LLM
@@ -58,14 +57,14 @@ graph TB
 │                assertOwnerAccess, buildChatContext, billing)  │
 ├───────────────────────────────────────────────┤
 │ Integration    MikrotikService · DuitkuService · LLM client  │
-│                crypto.util (AES-256-GCM) · BullMQ producer    │
+│                crypto.util (AES-256-GCM) · VoucherBatchWorker │
 ├───────────────────────────────────────────────┤
 │ Data           PrismaService (@prisma/adapter-pg) → Postgres │
 └───────────────────────────────────────────────┘
 ```
 
 Modul `@Global`: `prisma` (PrismaService) & `mikrotik` (MikrotikService) — dipakai lintas modul.
-`ConfigModule` global memuat config `app/database/jwt/redis/ai`.
+`ConfigModule` global memuat config `app` dan `jwt`.
 
 ---
 
@@ -78,7 +77,7 @@ Modul `@Global`: `prisma` (PrismaService) & `mikrotik` (MikrotikService) — dip
 | `users` | CRUD user, invariant Owner↔Teknisi, anti privilege-escalation |
 | `servers` | CRUD router, enkripsi kredensial, test koneksi, penegakan kuota |
 | `profiles` | CRUD hotspot profile + sync dari/ke router (transaksional) |
-| `vouchers` | Generate single/batch (BullMQ), PDF/QR, bulk delete |
+| `vouchers` | Generate single/batch (antrean tabel `voucher_batches` + `VoucherBatchWorker`), status/progres batch, PDF/QR, bulk delete |
 | `monitoring` | Active users, resource, traffic (polling) |
 | `ai` | Analyze config + chat kontekstual (context builder, multi-provider LLM) |
 | `billing` | Plan, Subscription, kuota, Duitku checkout+callback |
@@ -96,17 +95,17 @@ graph LR
     subgraph Host["Server aplikasi"]
         N[Node.js — NestJS<br/>PORT env]
     end
-    PG[(PostgreSQL<br/>:5433 wifi_mgmt_db)]
-    RDS[(Redis :6379)]
+    PG[(PostgreSQL<br/>:5433 wifi_mgmt_db<br/>+ voucher_batches)]
     N --> PG
-    N --> RDS
     N -. TLS/opsional .-> MT[MikroTik CHR/fisik]
 ```
 
-- Prasyarat runtime: **PostgreSQL** aktif, **Redis** aktif (BullMQ), MikroTik dengan **API service aktif**
-  (`/ip/service` → `api`/`api-ssl`).
+- Prasyarat runtime: **PostgreSQL** aktif dan MikroTik dengan **API service aktif**
+  (`/ip/service` → `api`/`api-ssl`). **Tidak ada service infra tambahan** (Redis tidak dipakai).
 - Proses: `npm run start:dev` (watch) / `npm run build` + `start:prod`.
-- BullMQ worker berjalan dalam proses yang sama (in-process) memakai Redis sebagai broker.
+- `VoucherBatchWorker` berjalan in-process, mem-poll tabel `voucher_batches` tiap
+  `VOUCHER_BATCH_POLL_INTERVAL_MS` (default 5000; `0` = nonaktif). Klaim baris memakai
+  `FOR UPDATE SKIP LOCKED` sehingga beberapa instance aplikasi aman berjalan bersamaan.
 
 > Catatan teknis: `start:prod` di `package.json` menunjuk `node dist/main` — path benar `node dist/src/main.js` (pre-existing).
 
@@ -119,18 +118,24 @@ graph LR
 sequenceDiagram
     participant C as Client (JWT)
     participant API as VouchersController
-    participant Q as BullMQ (Redis)
-    participant W as Worker
+    participant W as VoucherBatchWorker
     participant MT as MikroTik
     participant DB as Postgres
     C->>API: POST /vouchers/batch
-    API->>Q: enqueue job (N voucher)
-    API-->>C: 202 accepted (batchId)
-    Q->>W: dispatch
-    W->>MT: createHotspotUser × N
-    W->>DB: simpan Voucher × N
+    API->>DB: INSERT voucher_batches (status PENDING)
+    API-->>C: 201 {batchId, status: PENDING}
+    loop tiap VOUCHER_BATCH_POLL_INTERVAL_MS
+        W->>DB: klaim 1 batch PENDING tertua (FOR UPDATE SKIP LOCKED) → RUNNING
+        W->>DB: simpan Voucher (satu per satu) + createdCount
+        W->>MT: createHotspotUser per voucher
+    end
+    W->>DB: status DONE (atau PENDING utk retry, FAILED setelah 3 percobaan)
+    C->>API: GET /vouchers/batches/:batchId (progres)
     C->>API: GET /vouchers/pdf/batch/:batchId (publik)
 ```
+
+Batch `RUNNING` yang tak tersentuh >15 menit (proses mati di tengah) dikembalikan ke `PENDING` oleh
+worker agar tidak menggantung selamanya.
 
 ### 6.2 Pembayaran Duitku (webhook idempoten)
 ```mermaid
@@ -164,13 +169,13 @@ sequenceDiagram
 
 | Atribut | Pendekatan arsitektural |
 |---------|-------------------------|
-| Skalabilitas | Beban berat (batch) di-offload ke BullMQ; koneksi router stateless |
+| Skalabilitas | Beban berat (batch) di-offload ke worker antrean-DB (`FOR UPDATE SKIP LOCKED`, aman multi-instance); koneksi router stateless |
 | Ketersediaan | Router offline di-`try/catch` (chat/monitoring tak fatal) |
 | Keamanan | Lihat §7 (berlapis) |
 | Multi-tenancy | Scoping `ownerId` konsisten di semua modul |
 | Portabilitas router | Dukungan RouterOS v6 & v7 (patch reply `!empty`) |
 | Ekstensibilitas LLM | Dispatch multi-provider (`callLLM`) |
-| Observability | `ActivityLog` terpusat + Swagger |
+| Observability | `ActivityLog` terpusat + Swagger + progres/kegagalan batch tersimpan permanen di `voucher_batches` (`createdCount`, `errorMessage`) dan bisa ditanya lewat API |
 
 ---
 
@@ -190,7 +195,8 @@ sequenceDiagram
 
 - **Monitoring** masih polling (target real-time <5 dtk) → kandidat pola **hybrid push** (lihat §10.1).
 - **Histori trafik** belum dipersist (hanya realtime).
-- BullMQ worker in-process → dapat dipisah ke worker terdedikasi bila beban naik.
+- `VoucherBatchWorker` in-process → dapat dipisah ke proses worker terdedikasi bila beban naik
+  (tak perlu ubah antrean: klaim `FOR UPDATE SKIP LOCKED` sudah aman untuk banyak instance).
 - **POS** membuat voucher langsung (tak lewat `VouchersService`) & tanpa `quantity` (1 request = 1 voucher) — konsolidasi jalur voucher bisa jadi peningkatan berikutnya.
 
 ### 10.1 Arah Lanjut Monitoring — Pola Hybrid (polling router + push ke klien)
@@ -226,4 +232,4 @@ sequenceDiagram
 **Keuntungan vs polling per-klien saat ini:** beban router konstan (tak naik seiring jumlah klien),
 klien menerima update <detik hanya saat benar-benar berubah. **SSE** cukup bila arah data hanya
 server→klien (kasus monitoring); **WebSocket** bila butuh 2 arah. Perlu tambahan: Nest WebSocket/SSE
-gateway + penyimpanan snapshot terakhir (in-memory/Redis) untuk diff.
+gateway + penyimpanan snapshot terakhir (in-memory) untuk diff.

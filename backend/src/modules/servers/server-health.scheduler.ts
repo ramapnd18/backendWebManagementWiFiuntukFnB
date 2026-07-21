@@ -13,7 +13,7 @@ import { decryptSecret } from '../../common/crypto.util.js';
 /**
  * Health scheduler terpusat (B4).
  *
- * Ping SEMUA router secara periodik (setInterval, tanpa BullMQ/@nestjs/schedule)
+ * Ping SEMUA router secara periodik (setInterval polos, tanpa library scheduler)
  * lalu perbarui `lastStatus` + `lastCheckedAt` di DB. Tujuannya agar badge status
  * di `/servers` segar walau tak ada "Test Koneksi" manual maupun polling frontend.
  *

@@ -153,7 +153,6 @@ export class HealthService {
       'JWT_SECRET',
       'MIKROTIK_ENC_KEY',
       'FRONTEND_URL',
-      'REDIS_HOST',
       'PORT',
     ];
     return Object.fromEntries(keys.map((k) => [k, Boolean(process.env[k])]));

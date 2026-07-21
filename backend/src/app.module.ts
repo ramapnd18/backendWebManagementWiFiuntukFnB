@@ -19,14 +19,13 @@ import { AdminModule } from './modules/admin/admin.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import appConfig from './config/app.config.js';
 import jwtConfig from './config/jwt.config.js';
-import redisConfig from './config/redis.config.js';
 
 @Module({
   imports: [
     // ─── Config (global, tersedia di semua module) ─────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, jwtConfig, redisConfig],
+      load: [appConfig, jwtConfig],
       envFilePath: '.env',
     }),
 

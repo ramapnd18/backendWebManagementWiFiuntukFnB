@@ -22,7 +22,7 @@ Dokumen ini adalah **acuan dasar backend** dan pusat navigasi dokumentasi. Untuk
 | Framework | NestJS 11 (TypeScript, **ESM** — import pakai sufiks `.js`) |
 | ORM | Prisma 7 + `@prisma/adapter-pg` (driver adapter wajib di Prisma 7) |
 | Database | PostgreSQL (port `5433`, DB `wifi_mgmt_db`) |
-| Queue | BullMQ + Redis (generate voucher batch) |
+| Queue | **Antrean di PostgreSQL** — tabel `voucher_batches` + `VoucherBatchWorker` (poller, `FOR UPDATE SKIP LOCKED`). Tanpa Redis/message broker |
 | Auth & RBAC | JWT (`@nestjs/jwt` + passport-jwt) + **RolesGuard** (3 role: SUPER_ADMIN / OWNER / TEKNISI) |
 | Pembayaran | **Duitku** (Sandbox) — checkout invoice + webhook callback (signature) |
 | Integrasi MikroTik | **`routeros-client`** — RouterOS **API binary** (port 8728 / 8729-TLS), mendukung **RouterOS v6 & v7** |
@@ -109,7 +109,9 @@ Global prefix: **`/api`**. Validasi global via `ValidationPipe` (whitelist + tra
 | Verb | Path | Keterangan |
 |------|------|------------|
 | POST | `/vouchers/single` | Generate 1 voucher (instan) |
-| POST | `/vouchers/batch` | Generate batch (BullMQ background job) |
+| POST | `/vouchers/batch` | Generate batch (antrean tabel `voucher_batches`, diproses `VoucherBatchWorker` di background) |
+| GET | `/vouchers/batches?serverId=` | Daftar **50 batch terbaru** (ter-scope owner). Role: OWNER/TEKNISI/SUPER_ADMIN |
+| GET | `/vouchers/batches/:batchId` | **Status & progres** satu batch (`status`, `createdCount`, `progressPercent`, `attempts`, `errorMessage`). Role: OWNER/TEKNISI/SUPER_ADMIN |
 | POST | `/vouchers/delete-bulk` | Hapus massal (UNUSED) — **partial-safe** |
 | GET | `/vouchers` | List voucher (filter `status` → used/unused, pagination) |
 | GET | `/vouchers/stats?serverId=&profileId=` | Ringkasan jumlah per-status `{UNUSED,USED,REVOKED,EXPIRED,total}` (ter-scope) |
@@ -214,6 +216,7 @@ Model (`@@map` ke snake_case jamak, ID `cuid()`):
 | `MikrotikServer` | `mikrotik_servers` | **`ownerId`** (pemilik=Owner, onDelete Cascade), host, port, username, **password (AES)**, useSSL, lastStatus |
 | `HotspotProfile` | `hotspot_profiles` | rateLimit, sessionTimeout, sharedUsers, validity · unik `[serverId,name]` |
 | `Voucher` | `vouchers` | username (unik global), password, status, batchId, outletName, expiredAt |
+| `VoucherBatch` | `voucher_batches` | **antrean batch di DB**: `batchId` (PK), serverId, profileId, count, createdCount, usernamePrefix, charLength, charFormat, outletName, `status` (BatchStatus), attempts, errorMessage, startedAt, finishedAt |
 | `AiReport` | `ai_reports` | `userId?`, provider, configJson, resultMd, status |
 | `AiChatSession` | `ai_chat_sessions` | `userId` (pemilik), `serverId?`, title — riwayat chat multi-turn |
 | `AiChatMessage` | `ai_chat_messages` | `sessionId`, `role` (USER/ASSISTANT), content |
@@ -223,7 +226,7 @@ Model (`@@map` ke snake_case jamak, ID `cuid()`):
 | `PaymentTransaction` | `payment_transactions` | `merchantOrderId` (unik, idempotensi), amount, status, duitkuReference, paymentUrl, paidAt |
 | `PosApiKey` / `PosTransaction` | `pos_api_keys` / `pos_transactions` | integrasi POS (API key per-outlet + idempotensi transaksi). `PosTransaction` kini punya relasi `server`/`profile`/`voucher` untuk scoping & riwayat — lihat [`api/pos.md`](./api/pos.md) |
 
-Enum: `Role`, `ServerStatus`, `VoucherStatus`, `AiReportStatus`, `ChatRole`,
+Enum: `Role`, `ServerStatus`, `VoucherStatus`, `BatchStatus` (PENDING/RUNNING/DONE/FAILED), `AiReportStatus`, `ChatRole`,
 `SubscriptionStatus`, `PaymentStatus`, `PosTxStatus`, `LogAction` (+ aksi billing: `PAYMENT_INITIATED/RECEIVED/FAILED`, `SUBSCRIPTION_ACTIVATED`).
 
 **onDelete:** `User→Teknisi` Cascade · `Owner→MikrotikServer` Cascade · `Server→{Profile,Voucher,AiReport,ChatSession(SetNull)}` ·
@@ -266,7 +269,7 @@ webhook Duitku validasi **signature (MD5, `timingSafeEqual`) + idempoten**.
 
 **Env wajib** (`backend/.env`, lihat `.env.example`):
 ```
-DATABASE_URL, REDIS_HOST, REDIS_PORT
+DATABASE_URL
 JWT_SECRET            # wajib (tanpa fallback — gagal cepat bila kosong)
 JWT_EXPIRES_IN       # mis. 7d
 GOOGLE_CLIENT_ID     # opsional — Client ID OAuth 2.0 utk POST /auth/google (kosong → login Google nonaktif)
@@ -277,7 +280,9 @@ DUITKU_MERCHANT_CODE, DUITKU_API_KEY          # kosong → checkout 503 (kuota &
 DUITKU_BASE_URL, DUITKU_CALLBACK_URL, DUITKU_RETURN_URL
 POS_VOUCHER_CODE_LENGTH   # opsional, default 6 — panjang kode voucher POS (tak ada POS_API_KEY global; key per-outlet di DB)
 MONITORING_POLL_INTERVAL_MS  # opsional, default 3000 — interval poller monitoring real-time
+VOUCHER_BATCH_POLL_INTERVAL_MS  # opsional, default 5000 — interval poller worker voucher batch (0 = nonaktif)
 ```
+> `REDIS_HOST`/`REDIS_PORT` **sudah tidak ada** — antrean voucher batch kini memakai tabel PostgreSQL.
 
 ## 8. Command
 ```bash

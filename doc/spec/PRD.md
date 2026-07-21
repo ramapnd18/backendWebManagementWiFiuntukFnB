@@ -65,7 +65,7 @@ Legenda status: ✅ selesai · 🟡 sebagian · ❌ belum.
 | F3 | Manajemen User (Owner↔Teknisi, Super Admin) | Must | ✅ |
 | F4 | CRUD Server MikroTik + test koneksi + enkripsi kredensial | Must | ✅ |
 | F5 | CRUD Hotspot Profile + sync ke/dari router | Must | ✅ |
-| F6 | Voucher single/batch (BullMQ) + PDF/QR + bulk delete | Must | ✅ |
+| F6 | Voucher single/batch (antrean tabel PostgreSQL + worker) + status/progres batch + PDF/QR + bulk delete | Must | ✅ |
 | F7 | Monitoring (user aktif, resource, traffic) | Must | ✅ (polling) |
 | F8 | AI analisis konfigurasi router | Must | ✅ |
 | F9 | AI chat widget kontekstual (multi-turn) | Should | ✅ |
@@ -95,7 +95,8 @@ Legenda status: ✅ selesai · 🟡 sebagian · ❌ belum.
 - MikroTik memakai **RouterOS API binary** (port 8728 / 8729-TLS), bukan REST. Mendukung v6 & v7.
 - LLM via provider yang dikonfigurasi (`LLM_PROVIDER`: openrouter/gemini/openai/anthropic); butuh API key.
 - Duitku dipakai dalam mode **Sandbox**; tanpa kredensial → checkout mengembalikan 503 (kuota & callback tetap jalan).
-- Backend berjalan dengan PostgreSQL + Redis aktif.
+- Backend cukup berjalan dengan **PostgreSQL** aktif (antrean voucher batch memakai tabel `voucher_batches`,
+  jadi tidak ada service antrean terpisah).
 - Integrasi POS memakai **API key per-outlet** (`x-api-key`), terikat ke 1 server; POS tak perlu kirim `serverId`.
 
 ---
@@ -105,7 +106,8 @@ Legenda status: ✅ selesai · 🟡 sebagian · ❌ belum.
 - 0 kebocoran data lintas-tenant pada uji scoping (RBAC 45/45, AI chat 24/24, billing 33/33 skenario lulus).
 - Setiap endpoint terproteksi memakai `JwtAuthGuard` (+ `RolesGuard` bila ber-role); default-deny.
 - Webhook Duitku: 100% validasi signature + idempoten sebelum mengubah DB.
-- Voucher batch besar tidak memblokir request (diproses BullMQ background).
+- Voucher batch besar tidak memblokir request (diproses `VoucherBatchWorker` di background); progres
+  dan kegagalannya bisa ditanya lewat `GET /vouchers/batches/:batchId`.
 
 ---
 

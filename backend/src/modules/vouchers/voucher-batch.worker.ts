@@ -81,11 +81,11 @@ interface ClaimedBatch {
 /**
  * Worker pembuatan voucher batch — antrean bersandar pada PostgreSQL.
  *
- * Menggantikan BullMQ + Redis. Alasannya: generate batch dipicu manual oleh
- * admin (bukan trafik tinggi), sehingga menambah satu service infra tidak
- * sepadan. Tabel `voucher_batches` justru memberi yang tak dipunyai BullMQ pada
- * pemakaian di sini — progres yang bisa ditanya lewat API dan kegagalan yang
- * tersimpan permanen.
+ * Antrean sengaja bersandar pada tabel DB, bukan message broker terpisah:
+ * generate batch dipicu manual oleh admin (bukan trafik tinggi), sehingga
+ * menambah satu service infra tidak sepadan. Tabel `voucher_batches` sekaligus
+ * memberi progres yang bisa ditanya lewat API dan kegagalan yang tersimpan
+ * permanen.
  *
  * Alur:
  * 1. Poller periodik mengambil SATU batch PENDING tertua, dikunci dengan

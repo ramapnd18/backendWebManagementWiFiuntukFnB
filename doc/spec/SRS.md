@@ -28,7 +28,8 @@ dan (target) integrasi POS.
 
 ### 2.1 Perspektif Produk
 Backend adalah layanan stateless (koneksi MikroTik connect→write→close per operasi) di atas
-PostgreSQL + Redis. Terintegrasi dengan sistem eksternal: router MikroTik, LLM provider, Duitku, dan mesin POS.
+PostgreSQL (sekaligus menampung antrean voucher batch di tabel `voucher_batches`; tanpa Redis).
+Terintegrasi dengan sistem eksternal: router MikroTik, LLM provider, Duitku, dan mesin POS.
 
 ### 2.2 Aktor
 | Aktor | Autentikasi |
@@ -92,7 +93,9 @@ PostgreSQL + Redis. Terintegrasi dengan sistem eksternal: router MikroTik, LLM p
 | ID | Kebutuhan | Endpoint | Status |
 |----|-----------|----------|--------|
 | FR-6.1 | Generate 1 voucher instan | `POST /vouchers/single` | ✅ |
-| FR-6.2 | Generate batch via BullMQ background job | `POST /vouchers/batch` | ✅ |
+| FR-6.2 | Generate batch async: baris `PENDING` di tabel `voucher_batches`, diproses `VoucherBatchWorker` di background | `POST /vouchers/batch` | ✅ |
+| FR-6.2a | Pantau status & progres batch (`status`, `createdCount`, `progressPercent`, `attempts`, `errorMessage`); 404 bila batch tak ada | `GET /vouchers/batches/:batchId` | ✅ |
+| FR-6.2b | Daftar 50 batch terbaru ter-scope owner (filter opsional `serverId`) | `GET /vouchers/batches` | ✅ |
 | FR-6.3 | Hapus massal (status UNUSED), partial-safe | `POST /vouchers/delete-bulk` | ✅ |
 | FR-6.4 | List/detail voucher (ter-scope) | `GET /vouchers`, `GET /vouchers/:id` | ✅ |
 | FR-6.5 | PDF voucher (batch/single/filtered) dengan QR — **publik by design** | `GET /vouchers/pdf/...` | ✅ |
@@ -163,7 +166,7 @@ Autentikasi via header `x-api-key` (`PosApiKeyGuard`); API key terikat 1 server 
 ### NFR-2 Performa & Skalabilitas
 | ID | Kebutuhan | Status |
 |----|-----------|--------|
-| NFR-2.1 | Voucher batch tidak memblokir request (BullMQ background) | ✅ |
+| NFR-2.1 | Voucher batch tidak memblokir request (worker antrean tabel PostgreSQL; klaim `FOR UPDATE SKIP LOCKED` aman multi-instance, retry 3× lalu `FAILED`) | ✅ |
 | NFR-2.2 | Bulk delete voucher 1-koneksi router, partial-safe | ✅ |
 | NFR-2.3 | Konteks AI di-truncate (report 2000ch, konfig 4000ch, router ≤20, log 15) | ✅ |
 | NFR-2.4 | Monitoring real-time (target <5 dtk; saat ini polling 3–60 dtk) | 🟡 |
@@ -210,7 +213,7 @@ Autentikasi via header `x-api-key` (`PosApiKeyGuard`); API key terikat 1 server 
 | F3 User | FR-3 | `users` |
 | F4 Server | FR-4, NFR-1.2 | `servers` + `mikrotik` |
 | F5 Profile | FR-5 | `profiles` + `mikrotik` |
-| F6 Voucher | FR-6, NFR-2.1/2.2 | `vouchers` + BullMQ |
+| F6 Voucher | FR-6, NFR-2.1/2.2 | `vouchers` (+ `VoucherBatchWorker` / tabel `voucher_batches`) |
 | F7 Monitoring | FR-7, NFR-2.4 | `monitoring` |
 | F8/F9 AI | FR-8, NFR-2.3 | `ai` |
 | F10/F11 Billing | FR-9, NFR-1.6 | `billing` |

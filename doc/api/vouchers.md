@@ -1,11 +1,11 @@
 # API — Vouchers (Voucher Hotspot)
 
-**Modul:** `vouchers` (`VouchersController` + `VouchersService` + `VoucherQueueService` BullMQ).
+**Modul:** `vouchers` (`VouchersController` + `VouchersService` + `VoucherBatchWorker` — antrean berbasis tabel PostgreSQL).
 **Status:** ✅ Implementasi selesai & terverifikasi runtime (2026-07-16) — diuji terhadap MikroTik CHR 7.19.3 (`192.168.56.101:8728`).
 **Base URL:** `http://localhost:4000/api`
 
 Voucher = kredensial login hotspot (`username`/`password`) yang terdaftar sebagai user di MikroTik.
-Bisa dibuat satuan (instant) atau massal (batch, diproses di background via BullMQ), dan dicetak jadi
+Bisa dibuat satuan (instant) atau massal (batch, diproses di background oleh `VoucherBatchWorker`), dan dicetak jadi
 lembaran **PDF berisi kartu + QR** (endpoint PDF **publik** agar bisa dibuka langsung dari browser/struk).
 
 > Mutasi (single/batch/delete) → **TEKNISI & SUPER_ADMIN**. OWNER **boleh read-only**
@@ -21,7 +21,14 @@ lembaran **PDF berisi kartu + QR** (endpoint PDF **publik** agar bisa dibuka lan
 - Kode acak menghindari karakter ambigu (`O, I, 1, 0`). Password default = username (mode "voucher code").
 - **Scoping** (`serverScopeWhere` / `assertOwnerAccess`): SUPER_ADMIN = semua; OWNER = router miliknya;
   TEKNISI = router milik Owner-nya. Router milik Owner lain → **403**.
-- **Batch** tak dibuat sinkron: job masuk antrean BullMQ → response langsung `PENDING` + `batchId`.
+- **Batch** tak dibuat sinkron: satu baris disisipkan ke tabel `voucher_batches` (status `PENDING`) →
+  response langsung `PENDING` + `batchId`. `VoucherBatchWorker` mem-poll tabel itu secara periodik
+  (`VOUCHER_BATCH_POLL_INTERVAL_MS`, default 5000 ms; `0` = nonaktif), mengambil **satu batch PENDING
+  tertua** dengan `FOR UPDATE SKIP LOCKED` (aman untuk banyak instance), lalu membuat voucher satu per
+  satu (simpan DB → daftarkan ke MikroTik).
+- **Status batch** (enum `BatchStatus`): `PENDING` · `RUNNING` · `DONE` · `FAILED`. Batch `RUNNING`
+  yang mandek >15 menit dikembalikan ke `PENDING`; percobaan diulang sampai **3 kali** lalu `FAILED`.
+  Progres & pesan error bisa ditanya via `GET /vouchers/batches/:batchId`.
 - **Hapus massal** hanya untuk voucher `UNUSED`, **partial-safe**: hanya voucher yang benar-benar terhapus
   di router (atau memang sudah tak ada) yang dihapus dari DB; yang gagal tetap tersimpan untuk retry.
 
@@ -34,6 +41,8 @@ lembaran **PDF berisi kartu + QR** (endpoint PDF **publik** agar bisa dibuka lan
 | `POST /vouchers/single` | ✅ | ❌ 403 | ✅ |
 | `POST /vouchers/batch` | ✅ | ❌ 403 | ✅ |
 | `POST /vouchers/delete-bulk` | ✅ | ❌ 403 | ✅ |
+| `GET /vouchers/batches` | ✅ (semua) | ✅ (miliknya) | ✅ (milik Owner) |
+| `GET /vouchers/batches/:batchId` | ✅ (semua) | ✅ (miliknya) | ✅ (milik Owner) |
 | `GET /vouchers` | ✅ (semua) | ✅ (miliknya, read-only) | ✅ (milik Owner) |
 | `GET /vouchers/stats` | ✅ | ✅ (miliknya, read-only) | ✅ |
 | `GET /vouchers/:id` | ✅ | ✅ (miliknya, read-only) | ✅ |
@@ -94,7 +103,8 @@ Role: **TEKNISI / SUPER_ADMIN**. Membuat 1 voucher instant + mendaftarkan user d
 
 ### 2. Buat voucher massal — `POST /api/vouchers/batch`
 
-Role: **TEKNISI / SUPER_ADMIN**. Job dikirim ke **BullMQ** dan diproses di background (tidak menunggu selesai).
+Role: **TEKNISI / SUPER_ADMIN**. Permintaan disisipkan sebagai baris `PENDING` di tabel
+`voucher_batches` dan diproses di background oleh `VoucherBatchWorker` (tidak menunggu selesai).
 
 **Request Payload** (`GenerateBatchDto`)
 ```jsonc
@@ -109,7 +119,7 @@ Role: **TEKNISI / SUPER_ADMIN**. Job dikirim ke **BullMQ** dan diproses di backg
 }
 ```
 
-**Response 201 (Success)** — pekerjaan diterima antrean:
+**Response 201 (Success)** — pekerjaan diterima antrean (kontrak response **tidak berubah** setelah antrean pindah ke PostgreSQL):
 ```json
 {
   "message": "Pembuatan batch 50 voucher sedang diproses di background",
@@ -117,13 +127,76 @@ Role: **TEKNISI / SUPER_ADMIN**. Job dikirim ke **BullMQ** dan diproses di backg
   "status": "PENDING"
 }
 ```
-> Voucher hasil batch diambil kemudian via `GET /vouchers?serverId=...` atau dicetak via `GET /vouchers/pdf/batch/:batchId`.
+> Progres batch dipantau via `GET /vouchers/batches/:batchId`. Voucher hasil batch diambil kemudian via
+> `GET /vouchers?serverId=...` atau dicetak via `GET /vouchers/pdf/batch/:batchId`.
 
 **Response 404 (Error):** router / profil tidak ditemukan.
 
 ---
 
-### 3. Hapus voucher massal — `POST /api/vouchers/delete-bulk`
+### 3. Daftar batch — `GET /api/vouchers/batches`
+
+Role: **OWNER / TEKNISI / SUPER_ADMIN**. Mengembalikan **50 batch terbaru** (terbaru dulu), ter-scope owner.
+
+**Query (opsional):**
+| Param | Tipe | Keterangan |
+|-------|------|------------|
+| `serverId` | string | filter satu router |
+
+**Response 200 (Success)** — array (bukan `{data,meta}`):
+```jsonc
+[
+  {
+    "batchId": "BATCH-1752650000000-XYZ",
+    "status": "DONE",                    // PENDING | RUNNING | DONE | FAILED
+    "serverId": "cmq1...",
+    "serverName": "CHR-Lab",
+    "outletName": "Kafe Utama Jakarta",
+    "count": 50,
+    "createdCount": 50,
+    "progressPercent": 100,
+    "errorMessage": null,
+    "createdAt": "2026-07-21T...",
+    "finishedAt": "2026-07-21T..."
+  }
+]
+```
+
+---
+
+### 4. Status & progres batch — `GET /api/vouchers/batches/:batchId`
+
+Role: **OWNER / TEKNISI / SUPER_ADMIN**. Dipakai untuk memantau jalannya generate batch.
+
+**Response 200 (Success)**
+```jsonc
+{
+  "batchId": "BATCH-1752650000000-XYZ",
+  "status": "RUNNING",                 // PENDING | RUNNING | DONE | FAILED
+  "serverId": "cmq1...",
+  "serverName": "CHR-Lab",
+  "profileId": "cmp1...",
+  "outletName": "Kafe Utama Jakarta",
+  "count": 50,
+  "createdCount": 20,
+  "progressPercent": 40,               // dibulatkan; 0 bila count = 0
+  "attempts": 1,                       // percobaan ke-berapa (maks 3 → FAILED)
+  "errorMessage": null,                // pesan kegagalan terakhir bila ada
+  "startedAt": "2026-07-21T...",
+  "finishedAt": null,
+  "createdAt": "2026-07-21T..."
+}
+```
+
+> `errorMessage` juga terisi pada batch `DONE` bila sebagian voucher tersimpan di DB tetapi gagal
+> didaftarkan ke router — kegagalan tidak lagi hilang senyap.
+
+**Response 403 (Error):** batch milik Owner lain.
+**Response 404 (Error):** `{ "statusCode": 404, "message": "Batch BATCH-... tidak ditemukan", "error": "Not Found" }`
+
+---
+
+### 5. Hapus voucher massal — `POST /api/vouchers/delete-bulk`
 
 Role: **TEKNISI / SUPER_ADMIN**. Hanya voucher **UNUSED** yang boleh dihapus. **Partial-safe**.
 
@@ -154,7 +227,7 @@ Role: **TEKNISI / SUPER_ADMIN**. Hanya voucher **UNUSED** yang boleh dihapus. **
 
 ---
 
-### 4. Daftar voucher — `GET /api/vouchers`
+### 6. Daftar voucher — `GET /api/vouchers`
 
 Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Ter-scope + filter + pagination.
 
@@ -189,7 +262,7 @@ Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Ter-scope + filter + pagina
 
 ---
 
-### 5. Statistik voucher — `GET /api/vouchers/stats`
+### 7. Statistik voucher — `GET /api/vouchers/stats`
 
 Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Satu query `groupBy` status, ter-scope per Owner.
 
@@ -202,7 +275,7 @@ Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Satu query `groupBy` status
 
 ---
 
-### 6. Detail voucher — `GET /api/vouchers/:id`
+### 8. Detail voucher — `GET /api/vouchers/:id`
 
 Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Include relasi `profile` & `server`.
 
@@ -211,7 +284,7 @@ Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Include relasi `profile` & 
 
 ---
 
-### 7. Cetak PDF — `GET /api/vouchers/pdf/*` (PUBLIK)
+### 9. Cetak PDF — `GET /api/vouchers/pdf/*` (PUBLIK)
 
 **Tanpa JWT** (by design, agar bisa dibuka langsung dari browser/struk). Mengembalikan
 `Content-Type: application/pdf` (lembaran kartu voucher A4, grid 3×7, tiap kartu berisi QR login).
@@ -233,11 +306,15 @@ Role: **OWNER (read-only) / TEKNISI / SUPER_ADMIN**. Include relasi `profile` & 
 Router uji: **MikroTik CHR 7.19.3** (`192.168.56.101:8728`, RouterOS API binary) — ONLINE.
 Akun: `teknisi` (TEKNISI), `owner` (OWNER, paket FREE). Server: `CHR-Lab` (milik owner).
 
+> Uji ini dijalankan **sebelum** antrean batch dipindah ke tabel `voucher_batches`. Hasilnya tetap
+> berlaku: kontrak response `POST /vouchers/batch` tidak berubah. Endpoint `GET /vouchers/batches[/:batchId]`
+> belum tercakup pada sesi uji ini.
+
 | # | Skenario | Role | Hasil | Catatan |
 |---|----------|:-:|:-:|---------|
 | 1 | `POST /vouchers/single` | TEKNISI | **201** | voucher `{username,password,status:UNUSED,profile:{...}}` — user dibuat di router |
 | 2 | `POST /vouchers/single` (role) | OWNER | **403** | Owner dilarang mutasi |
-| 3 | `POST /vouchers/batch` | TEKNISI | **201** | `{"message":"Pembuatan batch 3 voucher sedang diproses di background","batchId":"BATCH-...","status":"PENDING"}` (BullMQ) |
+| 3 | `POST /vouchers/batch` | TEKNISI | **201** | `{"message":"Pembuatan batch 3 voucher sedang diproses di background","batchId":"BATCH-...","status":"PENDING"}` |
 | 4 | `GET /vouchers?take=2` | OWNER | **200** | `{data:[...], meta:{total,skip,take}}` |
 | 5 | `GET /vouchers/stats` | OWNER | **200** | `{"UNUSED":59,"USED":0,"REVOKED":0,"EXPIRED":0,"total":59}` |
 | 6 | `GET /vouchers/:id` | TEKNISI | **200** | detail + relasi `profile`/`server` |

@@ -12,7 +12,8 @@ Dokumen desain rinci backend: struktur modul, model data, alur kunci, guard/scop
 eksternal, dan keputusan desain. Berbasis kode aktual (`backend/src`, `prisma/schema.prisma`).
 
 Tech: **NestJS 11** (TypeScript ESM), **Prisma 7** + `@prisma/adapter-pg` + **PostgreSQL**,
-**BullMQ + Redis**, **JWT** (passport), **routeros-client** (API binary), **pdfkit + qrcode**,
+**antrean voucher batch berbasis tabel PostgreSQL** (`voucher_batches` + `VoucherBatchWorker`, tanpa
+message broker), **JWT** (passport), **routeros-client** (API binary), **pdfkit + qrcode**,
 **Duitku** (billing), **Swagger**. Global prefix `/api`.
 
 ---
@@ -23,8 +24,8 @@ Tech: **NestJS 11** (TypeScript ESM), **Prisma 7** + `@prisma/adapter-pg` + **Po
 
 ```
 main.ts                 # bootstrap: prefix /api, ValidationPipe, helmet, Swagger, CORS
-app.module.ts           # ConfigModule global (5 config), ThrottlerModule, feature modules
-config/                 # app, database, jwt, redis, ai
+app.module.ts           # ConfigModule global (2 config), ThrottlerModule, feature modules
+config/                 # app, jwt
 common/
   crypto.util.ts        # AES-256-GCM encrypt/decrypt kredensial router
   scope.util.ts         # serverScopeWhere, effectiveOwnerId, assertOwnerAccess
@@ -33,7 +34,7 @@ modules/
   users/                # CRUD user (Owner↔Teknisi, Super Admin)
   servers/              # CRUD server MikroTik + test koneksi
   profiles/             # CRUD hotspot profile + sync
-  vouchers/             # generate single/batch (BullMQ), PDF, bulk delete
+  vouchers/             # generate single/batch (voucher-batch.worker.ts), status batch, PDF, bulk delete
   monitoring/           # active users, resource, traffic
   ai/                   # analyze config + chat widget kontekstual
   billing/              # plans, subscription, kuota, Duitku checkout+callback
@@ -59,6 +60,7 @@ ID `cuid()`, tabel `@@map` snake_case jamak. Ringkasan (skema lengkap: `prisma/s
 | `MikrotikServer` | `mikrotik_servers` | `ownerId`, name, host, port(8728), username, **password(AES)**, useSSL, hotspotName?, dnsName?, lastStatus | owner (Cascade); punya profiles, vouchers, logs, aiReports, posApiKeys, chatSessions |
 | `HotspotProfile` | `hotspot_profiles` | serverId, name, rateLimit, sessionTimeout?, idleTimeout?, sharedUsers, validity?, syncedToRouter | server (Cascade); unik `[serverId,name]` |
 | `Voucher` | `vouchers` | serverId, profileId, username(unik), password, status, batchId?, outletName?, expiredAt? | server & profile (Cascade) |
+| `VoucherBatch` | `voucher_batches` | `batchId`(PK), serverId, profileId, count, createdCount, usernamePrefix?, charLength, charFormat, outletName?, **status**(BatchStatus), attempts, errorMessage?, startedAt?, finishedAt? | antrean batch (di-poll `VoucherBatchWorker`) |
 | `AiReport` | `ai_reports` | serverId, userId?, provider, configJson, resultMd, status | server (Cascade), user |
 | `AiChatSession` | `ai_chat_sessions` | userId, serverId?, title? | user (Cascade), server (SetNull), messages |
 | `AiChatMessage` | `ai_chat_messages` | sessionId, role(USER/ASSISTANT), content | session (Cascade) |
@@ -71,7 +73,8 @@ ID `cuid()`, tabel `@@map` snake_case jamak. Ringkasan (skema lengkap: `prisma/s
 
 ### 3.2 Enum
 `Role`(SUPER_ADMIN/OWNER/TEKNISI) · `ServerStatus`(ONLINE/OFFLINE/UNKNOWN) ·
-`VoucherStatus`(UNUSED/USED/REVOKED/EXPIRED) · `AiReportStatus`(PENDING/COMPLETED/FAILED) ·
+`VoucherStatus`(UNUSED/USED/REVOKED/EXPIRED) · `BatchStatus`(PENDING/RUNNING/DONE/FAILED) ·
+`AiReportStatus`(PENDING/COMPLETED/FAILED) ·
 `ChatRole`(USER/ASSISTANT) · `SubscriptionStatus`(ACTIVE/EXPIRED/CANCELLED) ·
 `PaymentStatus`(PENDING/PAID/FAILED/EXPIRED) · `PosTxStatus`(SUCCESS/FAILED) ·
 `LogAction`(auth/server/profile/voucher/POS/AI/billing/error).
@@ -133,7 +136,15 @@ create(@CurrentUser() user, @Body() dto) { /* effectiveOwnerId(user) */ }
 
 ### 5.3 Vouchers
 - `generateSingle`: buat user hotspot di router + record Voucher (instan).
-- `generateBatch`: enqueue **BullMQ** job (Redis) → worker generate N voucher background → tak blok request.
+- `generateBatch`: INSERT satu baris `voucher_batches` (status `PENDING`) → balas `{message, batchId, status:"PENDING"}`
+  seketika (tak blok request). `VoucherBatchWorker` (in-process) mem-poll tabel tiap
+  `VOUCHER_BATCH_POLL_INTERVAL_MS` (default 5000; `0` = nonaktif), mengklaim **1 batch PENDING tertua**
+  via `UPDATE ... WHERE batchId = (SELECT ... FOR UPDATE SKIP LOCKED)` → `RUNNING`, lalu membuat voucher
+  satu per satu (simpan DB → `createHotspotUser`), memperbarui `createdCount` berkala.
+  Selesai → `DONE`; gagal → kembali `PENDING` sampai **3 percobaan**, lalu `FAILED` (+ `errorMessage`).
+  Batch `RUNNING` mandek >15 menit dipulihkan ke `PENDING`.
+- `listBatches` / `getBatchStatus`: `GET /vouchers/batches` (50 terbaru, ter-scope, filter `serverId`) dan
+  `GET /vouchers/batches/:batchId` (status + `progressPercent` + `attempts` + `errorMessage`; 404 bila tak ada).
 - `deleteBulk`: hapus voucher UNUSED + `removeHotspotUsersByNames` (partial-safe).
 - PDF: `pdfkit` + `qrcode`; endpoint PDF **publik** (agar dibuka langsung dari struk/browser).
 
@@ -214,12 +225,13 @@ Detail kontrak endpoint: [`../api/pos.md`](../api/pos.md).
 
 ## 7. Konfigurasi & Environment
 
-`ConfigModule` global memuat: `app`, `database`, `jwt`, `redis`, `ai`.
+`ConfigModule` global memuat: `app`, `jwt`.
 
 Env wajib/relevan (`backend/.env`, lihat `.env.example`):
 ```
-DATABASE_URL, REDIS_HOST, REDIS_PORT
+DATABASE_URL
 JWT_SECRET, JWT_EXPIRES_IN
+VOUCHER_BATCH_POLL_INTERVAL_MS   # opsional, default 5000 (0 = worker batch nonaktif)
 MIKROTIK_ENC_KEY                 # 64-hex (32 byte)
 LLM_PROVIDER, OPENROUTER_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
 FRONTEND_URL, PORT
@@ -238,7 +250,7 @@ DUITKU_MERCHANT_CODE, DUITKU_API_KEY, DUITKU_BASE_URL, DUITKU_CALLBACK_URL, DUIT
 | Guard per-controller (bukan global) | Endpoint tanpa `@Roles` cukup JWT; config wajib `@Roles` |
 | RouterOS **API binary** (bukan REST) | Dukungan v6+v7 & operasi hotspot lengkap via `routeros-client` |
 | Kuota dari `Subscription` (normalized) | Sumber kebenaran tunggal; fallback FREE |
-| Voucher batch via BullMQ | Hindari blocking request untuk batch besar |
+| Voucher batch via antrean tabel PostgreSQL (bukan message broker) | Hindari blocking request untuk batch besar **tanpa** menambah service infra: generate batch dipicu manual oleh admin (bukan trafik tinggi). Bonus: progres bisa ditanya lewat API, kegagalan tersimpan permanen (`errorMessage`), riwayat batch bisa didaftar |
 | Konteks AI di-truncate | Batasi biaya/latensi LLM |
 | Koneksi router stateless | Sederhana & tahan terhadap koneksi router yang tak stabil |
 

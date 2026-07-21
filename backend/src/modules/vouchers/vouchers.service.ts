@@ -189,8 +189,8 @@ export class VouchersService {
   /**
    * Status & progres satu batch.
    *
-   * Ini yang dulu tak bisa dijawab saat antrean masih di Redis: progres BullMQ
-   * hanya hidup di memori Redis dan tak terekspos ke API.
+   * Bisa dijawab karena antrean tersimpan di DB — progres ikut bertahan walau
+   * proses worker mati dan hidup lagi.
    */
   async getBatchStatus(batchId: string, user: AuthUser) {
     const batch = await this.prisma.voucherBatch.findUnique({
