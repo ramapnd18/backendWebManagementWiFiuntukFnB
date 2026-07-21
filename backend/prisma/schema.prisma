@@ -82,6 +82,7 @@ model MikrotikServer {
   posTransactions PosTransaction[]
   chatSessions    AiChatSession[]
   healthChecks    RouterHealthCheck[]
+  voucherBatches  VoucherBatch[]
 
   @@index([ownerId])
   @@map("mikrotik_servers")
@@ -129,6 +130,7 @@ model HotspotProfile {
   server          MikrotikServer   @relation(fields: [serverId], references: [id], onDelete: Cascade)
   vouchers        Voucher[]
   posTransactions PosTransaction[]
+  voucherBatches  VoucherBatch[]
 
   @@unique([serverId, name])
   @@map("hotspot_profiles")
@@ -168,6 +170,46 @@ enum VoucherStatus {
   USED
   REVOKED
   EXPIRED
+}
+
+/// Antrean pembuatan voucher batch — menggantikan BullMQ/Redis.
+///
+/// Alasan pakai tabel DB, bukan Redis: generate batch dipicu manual oleh admin
+/// (bukan trafik tinggi), sehingga menambah satu service infra tidak sepadan.
+/// Tabel ini justru memberi yang tak dipunyai BullMQ di sini: progres yang bisa
+/// ditanya lewat API dan kegagalan yang tersimpan permanen.
+model VoucherBatch {
+  batchId        String      @id // format: BATCH-<timestamp>-<random>
+  serverId       String
+  profileId      String
+  count          Int // jumlah voucher yang diminta
+  createdCount   Int         @default(0) // sudah berhasil dibuat — dipakai untuk progres
+  usernamePrefix String?
+  charLength     Int         @default(6)
+  charFormat     String      @default("UPPERCASE")
+  outletName     String?
+  status         BatchStatus @default(PENDING)
+  attempts       Int         @default(0) // percobaan yang sudah dipakai (batas di worker)
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  server  MikrotikServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  profile HotspotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+  // Worker mengambil batch tertua yang PENDING → indeks gabungan status+createdAt.
+  @@index([status, createdAt])
+  @@map("voucher_batches")
+}
+
+enum BatchStatus {
+  PENDING // menunggu diambil worker
+  RUNNING // sedang diproses
+  DONE // selesai (createdCount bisa < count bila ada voucher yang gagal di router)
+  FAILED // gagal total setelah melewati batas percobaan
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

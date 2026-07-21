@@ -61,6 +61,40 @@ export class VouchersController {
     return this.vouchersService.generateBatch(dto, user);
   }
 
+  @Get('batches')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Daftar batch voucher (50 terbaru, ter-scope owner)',
+  })
+  @ApiResponse({ status: 200, description: 'Daftar batch berhasil diambil' })
+  async listBatches(
+    @CurrentUser() user: AuthUser,
+    @Query('serverId') serverId?: string,
+  ) {
+    return this.vouchersService.listBatches(user, serverId);
+  }
+
+  @Get('batches/:batchId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER', 'TEKNISI', 'SUPER_ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Status & progres satu batch',
+    description:
+      'Pantau jalannya generate batch: status (PENDING/RUNNING/DONE/FAILED), ' +
+      'jumlah voucher yang sudah jadi, persentase, dan pesan error bila gagal.',
+  })
+  @ApiResponse({ status: 200, description: 'Status batch berhasil diambil' })
+  @ApiResponse({ status: 404, description: 'Batch tidak ditemukan' })
+  async getBatchStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('batchId') batchId: string,
+  ) {
+    return this.vouchersService.getBatchStatus(batchId, user);
+  }
+
   @Post('delete-bulk')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('TEKNISI', 'SUPER_ADMIN')

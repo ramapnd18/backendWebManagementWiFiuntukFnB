@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MikrotikService } from '../mikrotik/mikrotik.service.js';
-import { VoucherQueueService } from './voucher-queue.service.js';
 import { ActivityLogService } from '../activity-log/activity-log.service.js';
 import { GenerateSingleDto } from './dto/generate-single.dto.js';
 import { GenerateBatchDto } from './dto/generate-batch.dto.js';
@@ -38,7 +37,6 @@ export class VouchersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mikrotikService: MikrotikService,
-    private readonly queueService: VoucherQueueService,
     private readonly activityLogService: ActivityLogService,
   ) {}
 
@@ -158,16 +156,18 @@ export class VouchersService {
     // 3. Buat Batch ID unik
     const batchId = `BATCH-${Date.now()}-${generateRandomCode(3)}`;
 
-    // 4. Kirim job ke BullMQ Queue
-    await this.queueService.addJob({
-      serverId,
-      profileId,
-      count,
-      usernamePrefix,
-      charLength,
-      charFormat,
-      outletName,
-      batchId,
+    // 4. Antrekan batch di DB — diambil VoucherBatchWorker pada putaran berikutnya
+    await this.prisma.voucherBatch.create({
+      data: {
+        batchId,
+        serverId,
+        profileId,
+        count,
+        usernamePrefix,
+        charLength: charLength ?? 6,
+        charFormat: charFormat ?? 'UPPERCASE',
+        outletName,
+      },
     });
 
     // 5. Catat Log
@@ -184,6 +184,73 @@ export class VouchersService {
       batchId,
       status: 'PENDING',
     };
+  }
+
+  /**
+   * Status & progres satu batch.
+   *
+   * Ini yang dulu tak bisa dijawab saat antrean masih di Redis: progres BullMQ
+   * hanya hidup di memori Redis dan tak terekspos ke API.
+   */
+  async getBatchStatus(batchId: string, user: AuthUser) {
+    const batch = await this.prisma.voucherBatch.findUnique({
+      where: { batchId },
+      include: { server: { select: { ownerId: true, name: true } } },
+    });
+    if (!batch) {
+      throw new NotFoundException(`Batch ${batchId} tidak ditemukan`);
+    }
+    assertOwnerAccess(user, batch.server.ownerId);
+
+    return {
+      batchId: batch.batchId,
+      status: batch.status,
+      serverId: batch.serverId,
+      serverName: batch.server.name,
+      profileId: batch.profileId,
+      outletName: batch.outletName,
+      count: batch.count,
+      createdCount: batch.createdCount,
+      progressPercent:
+        batch.count > 0
+          ? Math.round((batch.createdCount / batch.count) * 100)
+          : 0,
+      attempts: batch.attempts,
+      errorMessage: batch.errorMessage,
+      startedAt: batch.startedAt,
+      finishedAt: batch.finishedAt,
+      createdAt: batch.createdAt,
+    };
+  }
+
+  /** Daftar batch ter-scope owner, terbaru dulu. */
+  async listBatches(user: AuthUser, serverId?: string) {
+    const where: Record<string, unknown> = {
+      server: serverScopeWhere(user),
+    };
+    if (serverId) where.serverId = serverId;
+
+    const batches = await this.prisma.voucherBatch.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { server: { select: { name: true } } },
+    });
+
+    return batches.map((b) => ({
+      batchId: b.batchId,
+      status: b.status,
+      serverId: b.serverId,
+      serverName: b.server.name,
+      outletName: b.outletName,
+      count: b.count,
+      createdCount: b.createdCount,
+      progressPercent:
+        b.count > 0 ? Math.round((b.createdCount / b.count) * 100) : 0,
+      errorMessage: b.errorMessage,
+      createdAt: b.createdAt,
+      finishedAt: b.finishedAt,
+    }));
   }
 
   /**
