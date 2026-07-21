@@ -25,7 +25,7 @@ function getKey(): Buffer {
 }
 
 /** True bila nilai sudah dalam format terenkripsi. */
-export function isEncrypted(value: string | null | undefined): boolean {
+function isEncrypted(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.startsWith(PREFIX);
 }
 
