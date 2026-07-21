@@ -1,6 +1,10 @@
 node_modules/
+# Semua varian .env diabaikan (.env, .env.1, .env.local, .env.produksi, dst)
+# agar salinan berisi kredensial asli tak pernah ikut ter-commit.
 .env
-.env.local
+.env.*
+# KECUALI template — file ini sengaja dilacak dan HANYA boleh berisi placeholder.
+!.env.example
 backups/
 dist/
 .next/
