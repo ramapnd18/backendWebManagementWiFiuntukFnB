@@ -40,24 +40,28 @@ export class ServersService {
     // Validasi kuota paket langganan sebelum menambah router
     await this.billingService.assertCanAddRouter(ownerId);
 
-    // Cek duplikat host per-owner (isolasi antar tenant)
+    // Port RouterOS API binary: 8728 (api) / 8729 (api-ssl). BUKAN 80/443 —
+    // itu port web, bukan service API yang dipakai `routeros-client`.
+    const resolvedPort = port || (useSSL ? 8729 : 8728);
+
+    // Cek duplikat berdasarkan HOST + PORT, bukan host saja: beberapa router bisa
+    // berada di balik satu IP publik yang sama dengan port-forward berbeda —
+    // lazim untuk multi-outlet. Tetap di-scope per-owner (isolasi antar tenant).
     const existingServer = await this.prisma.mikrotikServer.findFirst({
-      where: { host, ownerId },
+      where: { host, port: resolvedPort, ownerId },
     });
     if (existingServer) {
       throw new BadRequestException(
-        `Router dengan IP/Host ${host} sudah terdaftar`,
+        `Router dengan host ${host} port ${resolvedPort} sudah terdaftar`,
       );
     }
-
-    const defaultPort = port || (useSSL ? 443 : 80);
 
     const server = await this.prisma.mikrotikServer.create({
       data: {
         ownerId,
         name,
         host,
-        port: defaultPort,
+        port: resolvedPort,
         username,
         password: encryptSecret(password), // enkripsi at-rest (AES-256-GCM)
         useSSL: useSSL ?? false,
@@ -96,18 +100,27 @@ export class ServersService {
   }
 
   async update(id: string, updateServerDto: UpdateServerDto, user: AuthUser) {
-    await this.findOne(id, user);
+    const current = await this.findOne(id, user);
 
-    if (updateServerDto.host) {
+    // Cek duplikat bila host ATAU port berubah. Sebelumnya hanya dicek saat host
+    // diisi, sehingga mengubah port saja bisa membuat pasangan host+port kembar.
+    if (updateServerDto.host || updateServerDto.port) {
+      const nextHost = updateServerDto.host ?? current.host;
+      const nextPort = updateServerDto.port ?? current.port;
+
       const existingServer = await this.prisma.mikrotikServer.findFirst({
         where: {
-          host: updateServerDto.host,
+          host: nextHost,
+          port: nextPort,
+          // Scope per-owner: tanpa ini router milik owner LAIN dengan host sama
+          // ikut memblokir, padahal antar tenant harus terisolasi.
+          ownerId: current.ownerId,
           id: { not: id },
         },
       });
       if (existingServer) {
         throw new BadRequestException(
-          `Router dengan IP/Host ${updateServerDto.host} sudah terdaftar`,
+          `Router dengan host ${nextHost} port ${nextPort} sudah terdaftar`,
         );
       }
     }

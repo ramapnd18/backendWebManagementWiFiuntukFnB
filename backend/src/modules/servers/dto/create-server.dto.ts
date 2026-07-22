@@ -19,7 +19,9 @@ export class CreateServerDto {
   name!: string;
 
   @ApiProperty({
-    description: 'IP Address atau domain router',
+    description:
+      'IP Address atau domain router. Boleh sama dengan router lain selama ' +
+      'port-nya berbeda (mis. beberapa router di balik satu IP publik dengan port-forward).',
     example: '10.168.26.96',
   })
   @IsString({ message: 'Host harus berupa string' })
@@ -54,7 +56,8 @@ export class CreateServerDto {
   password!: string;
 
   @ApiProperty({
-    description: 'Gunakan SSL (HTTPS) untuk koneksi REST API',
+    description:
+      'Gunakan TLS untuk koneksi RouterOS API (api-ssl). Mempengaruhi port default: 8729 bila true, 8728 bila false.',
     example: false,
     required: false,
     default: false,
